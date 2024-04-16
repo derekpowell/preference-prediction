@@ -47,3 +47,11 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# mac stuff
+.DS_Store
+*/.DS_Store
+
+# custom
+/local
+*/local
