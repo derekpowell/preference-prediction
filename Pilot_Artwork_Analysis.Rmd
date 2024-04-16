@@ -1,0 +1,278 @@
+---
+title: "pilot study data"
+output:
+  html_document: default
+  pdf_document: default
+date: "2024-03-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, include=FALSE}
+library(themis)
+library(tidyverse)
+library(tidymodels)
+library(tidyclust)
+library(ggplot2)
+```
+```{r}
+library(readr)
+
+Artworks <- read_csv("Artworks - Sheet1.csv")
+
+
+demographics <- read_csv("demographics.csv")
+
+qualtrics_data <- read_csv("Pilot study qualtrics data.csv")
+```
+
+
+
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+artworks <- Artworks
+```
+
+
+```{r setup,echo=FALSE}
+library(dplyr)
+
+
+rating_columns <- names(qualtrics_data)[grepl('rating_scores', names(qualtrics_data))]
+
+
+is_numeric_or_na <- function(x) {
+  suppressWarnings(!is.na(as.numeric(as.character(x)))) | is.na(x)
+}
+
+
+filtered_qualtrics_data <- qualtrics_data %>%
+  rowwise() %>%
+  filter(all(sapply(c_across(all_of(rating_columns)), is_numeric_or_na))) %>%
+  ungroup()
+
+str(filtered_qualtrics_data)
+
+
+```
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+
+qualtrics_long <- filtered_qualtrics_data %>%
+  pivot_longer(
+    cols = contains('rating_scores'),
+    names_to = 'Artwork_ID',
+    names_pattern = '(\\d+)_rating_scores', 
+    values_to = 'Rating'
+  ) %>%
+  mutate(Artwork_ID = as.numeric(Artwork_ID))  
+
+
+head(qualtrics_long)
+```
+
+
+```{r}
+artworks$ID <- 1:nrow(artworks)
+
+final_dataset <- merge(artworks, qualtrics_long, by = 'Artwork_ID')
+
+
+```
+
+
+Averages
+```{r}
+library(dplyr)
+final_dataset$Rating <- as.numeric(as.character(final_dataset$Rating))
+
+sum(is.na(final_dataset$Rating))
+
+average_ratings_by_style <- final_dataset %>%
+  filter(!is.na(Rating) & !is.na(Style)) %>%
+  group_by(Style) %>%
+  summarize(Average_Rating = mean(Rating, na.rm = TRUE))
+
+
+print(average_ratings_by_style)
+
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+final_dataset<- final_dataset
+final_dataset$Rating <- final_dataset$Rating - 50
+
+average_ratings_by_style <- final_dataset %>%
+  filter(!is.na(Rating) & !is.na(Style)) %>%
+  group_by(Style) %>%
+  summarize(
+    Average_Rating = mean(Rating, na.rm = TRUE),
+    SD_Rating = sd(Rating, na.rm = TRUE),
+    n = n() 
+  )
+
+average_ratings_by_style <- average_ratings_by_style %>%
+  arrange(Average_Rating)
+
+ggplot(average_ratings_by_style, aes(x = reorder(Style, Average_Rating), y = Average_Rating)) +
+  geom_bar(stat = "identity", fill = "orange") +
+  geom_errorbar(aes(ymin = Average_Rating - SD_Rating/sqrt(n), ymax = Average_Rating + SD_Rating/sqrt(n)), width = 0.2) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +  # Add a red dashed horizontal line at y=50
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Average Liking Ratings Across Art Styles/Movements", x = "Art Style", y = "Average Rating")+
+  scale_y_continuous(breaks = seq(-50, 50, 10), limits = c(-25, 20))
+
+
+
+
+```
+
+
+Top 10s 
+```{r}
+library(dplyr)
+
+average_ratings_by_piece <- final_dataset %>%
+  group_by(Title) %>%
+  summarize(Average_Rating = mean(Rating, na.rm = TRUE))
+
+top_liked <- average_ratings_by_piece %>%
+  arrange(desc(Average_Rating)) %>%
+  slice_head(n = 10)
+
+
+least_liked <- average_ratings_by_piece %>%
+  arrange(Average_Rating) %>%
+  slice_head(n = 10)
+
+
+print(top_liked)
+print(least_liked)
+
+```
+
+
+
+
+```{r}
+
+std_dev_by_style <- final_dataset %>%
+  group_by(Style) %>%
+  summarize(SD_Rating = sd(Rating, na.rm = TRUE))
+
+
+ggplot(std_dev_by_style, aes(x = Style, y = SD_Rating)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Disagreement in Ratings Across Art Styles/Movements")
+
+```
+
+
+
+```{r}
+
+std_dev_by_piece <- final_dataset %>%
+  group_by(Title) %>%
+  summarize(SD_Rating = sd(Rating, na.rm = TRUE))
+
+
+divisive_pieces <- std_dev_by_piece %>%
+  arrange(desc(SD_Rating)) %>%
+  top_n(10)
+
+
+agreed_on_pieces <- std_dev_by_piece %>%
+  arrange(SD_Rating) %>%
+  top_n(-10)
+
+print(divisive_pieces)
+print(agreed_on_pieces)
+```
+
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+
+std_dev_by_piece <- final_dataset %>%
+  group_by(Title) %>%
+  summarize(SD_Rating = sd(Rating, na.rm = TRUE))
+
+
+divisive_pieces1 <- std_dev_by_piece %>%
+  top_n(6, SD_Rating)
+
+
+agreed_on_pieces1 <- std_dev_by_piece %>%
+  top_n(6, -SD_Rating)
+
+
+divisive_data <- final_dataset %>%
+  filter(Title %in% divisive_pieces1$Title)
+
+agreed_on_data <- final_dataset %>%
+  filter(Title %in% agreed_on_pieces1$Title)
+
+
+
+ggplot(divisive_data, aes(x = Rating)) +
+  geom_histogram(bins = 10, fill="red") +
+  facet_wrap(~Title, scales = "free_y", nrow = 3, ncol = 2) +
+  labs(title = "Histogram of Ratings for the Most Divisive Pieces")+
+  scale_y_continuous(breaks = seq(-50, 50, 10))
+
+ggplot(agreed_on_data, aes(x = Rating)) +
+  geom_histogram(bins = 10, fill= "green") +
+  facet_wrap(~Title, scales = "free_y", nrow = 3, ncol = 2) +  
+  labs(title = "Histogram of Ratings for the Most Agreed Upon Pieces")+
+  scale_y_continuous(breaks = seq(-50, 50, 10))
+
+
+```
+
+```{r}
+library(readr)
+Spotify_data <- read_csv("Spotify_data.csv")
+glimpse(Spotify_data)
+```
+
+```{r}
+
+library(dplyr)
+library(ggplot2)
+
+sd_by_title <- final_dataset %>%
+  group_by(Title) %>%
+  summarise(ratings_sd = sd(Rating, na.rm = TRUE))
+
+
+clean_dataset <- final_dataset 
+
+
+ggplot(clean_dataset, aes(x = Rating)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black") +  
+  xlab("Rating Scores") +
+  ylab("Count") +
+  ggtitle("Histogram of Rating Variability Across Rating Scores")
+
+
+```
+
