@@ -280,8 +280,15 @@ ggplot(clean_dataset, aes(x = Rating)) +
 
 ### Data prep
 ```{r}
-recomm_data<- filtered_qualtrics_data%>%
-  select(-StartDate, -EndDate, -Progress, -`Duration (in seconds)`, -Finished, -RecordedDate, -DistributionChannel, -UserLanguage, -consent, -visits, -art_knowledge, -opens_1, -opens_2, -opens_3, -edu, -age, -gender, -`gender _4_TEXT`, -participantID)
+# recomm_data<- filtered_qualtrics_data %>%
+#   select(-StartDate, -EndDate, -Progress, -`Duration (in seconds)`, -Finished, -RecordedDate, -DistributionChannel, -UserLanguage, -consent, -visits, -art_knowledge, -opens_1, -opens_2, -opens_3, -edu, -age, -gender, -`gender _4_TEXT`, -participantID)
+
+# This should get you started -- DP 2024-04-30
+recomm_data <- final_dataset %>% 
+  select(participantID, ID, Rating)
+
+recomm_data %>% 
+  spread(ID, Rating) 
 ```
 
 
