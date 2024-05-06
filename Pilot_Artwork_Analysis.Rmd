@@ -40,7 +40,7 @@ artworks <- Artworks
 ```
 
 
-```{r setup,echo=FALSE}
+```{r setup}
 library(dplyr)
 
 
@@ -115,9 +115,6 @@ print(average_ratings_by_style)
 ```{r}
 library(ggplot2)
 library(dplyr)
-
-final_dataset<- final_dataset
-final_dataset$Rating <- final_dataset$Rating - 50
 
 average_ratings_by_style <- final_dataset %>%
   filter(!is.na(Rating) & !is.na(Style)) %>%
@@ -292,177 +289,31 @@ recomm_data %>%
 ```
 
 
-```{r}
-ids <- str_extract(colnames(recomm_data), "^[0-9]+")
-ids1 <- ids[(1:200) ] 
-ids1
-```
-
 
 ```{r}
 
-artworks$ID <- as.character(artworks$ID)
-
-
-lookup_table <- artworks %>% select(ID, Title)
-
-```
-
-
-```{r}
-
-new_names <- lookup_table %>% 
-  filter(ID %in% ids) %>% 
-  arrange(match(ID, ids)) %>%  
-  pull(Title)
-
-if (length(new_names) == ncol(recomm_data)) {
-  colnames(recomm_data) <- new_names
-} else {
-  warning("Mismatch in number of columns and number of new names")
-}
-```
-
-
-
-### Model building (Example/Test)
-
-
-```{r}
-set.seed(1234)
-
-library("recommenderlab")
-data("MovieLense")
-
-MovieLense100 <- MovieLense[rowCounts(MovieLense) > 100, ]
-MovieLense100
-str(MovieLense)
-```
-
-
-```{r}
-train <- MovieLense100[1:300]
-rec <- Recommender(train, method = "UBCF")
-rec
-```
-
-```{r}
-pre <- predict(rec, MovieLense100[301:302], n = 5)
-pre
-as(pre, "list")
-```
-
-
-```{r}
-scheme <- evaluationScheme(MovieLense100, method = "cross-validation", k = 10, given = -5,
-    goodRating = 4)
-scheme
-```
-```{r}
-algorithms <- list(`random items` = list(name = "RANDOM", param = NULL), `popular items` = list(name = "POPULAR",
-    param = NULL), `user-based CF` = list(name = "UBCF", param = list(nn = 3)), `item-based CF` = list(name = "IBCF",
-    param = list(k = 100)))
-
-results <- evaluate(scheme, algorithms, type = "topNList", n = c(1, 3, 5, 10), progress = FALSE)
-
-plot(results, annotate = 2, legend = "topleft")
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-### Model building (real)
-
-```{r}
-ratings_matrix <- as.matrix(recomm_data)
-rownames(ratings_matrix) <- 1:nrow(ratings_matrix)
-
-str(ratings_matrix)
-```
-
-```{r}
-# Convert to numeric, assuming 'mat' is your second matrix
-ratings_matrix <- as.matrix(sapply(ratings_matrix, as.numeric))
-
-```
-
-```{r}
-library(Matrix)
-
-# Convert the matrix to a sparse format 'dgCMatrix'
-sparse_mat <- sparseMatrix(i = row(ratings_matrix)[!is.na(ratings_matrix)], j = col(ratings_matrix)[!is.na(ratings_matrix)], 
-                           x = as.numeric(ratings_matrix[!is.na(ratings_matrix)]),
-                           dims = dim(ratings_matrix),
-                           dimnames = dimnames(ratings_matrix))
-
-```
-
-```{r}
 library(recommenderlab)
 
-# Create a realRatingMatrix object
-usable_rating_matrix <- new("realRatingMatrix", data = sparse_mat)
-# Print the structure of the new matrix
-str(usable_rating_matrix)
 
+
+ratings_data <- as(recomm_data, "realRatingMatrix")
+recommender_model <- Recommender(ratings_data, method = "UBCF")
 ```
+
 
 
 ```{r}
-library("recommenderlab")
-train <- usable_rating_matrix[]
-rec <- Recommender(train, method = "UBCF")
-rec
-```
 
+recommendations <- predict(recommender_model, ratings_data[1:5], n = 5)
 
-```{r}
-set.seed(1234)
-
-library("recommenderlab")
-data("MovieLense")
-
-MovieLense100 <- MovieLense[rowCounts(MovieLense) > 100, ]
-MovieLense100
-str(MovieLense)
-```
-
-
-```{r}
-train <- MovieLense100[1:300]
-rec <- Recommender(train, method = "UBCF")
-rec
+recommendation_list <- as(recommendations, "list")
+print(recommendation_list)
 ```
 
 ```{r}
-pre <- predict(rec, MovieLense100[301:302], n = 5)
-pre
-as(pre, "list")
+evaluation_scheme <- evaluationScheme(ratings_data, method = "cross-validation", k = 5, given = 3, goodRating = 5)
+
+results <- evaluate(evaluation_scheme, method = "UBCF", n = 5)
+print(avg(results@results))
 ```
 
-
-```{r}
-scheme <- evaluationScheme(MovieLense100, method = "cross-validation", k = 10, given = -5,
-    goodRating = 4)
-scheme
-```
-```{r}
-algorithms <- list(`random items` = list(name = "RANDOM", param = NULL), `popular items` = list(name = "POPULAR",
-    param = NULL), `user-based CF` = list(name = "UBCF", param = list(nn = 3)), `item-based CF` = list(name = "IBCF",
-    param = list(k = 100)))
-
-results <- evaluate(scheme, algorithms, type = "topNList", n = c(1, 3, 5, 10), progress = FALSE)
-
-plot(results, annotate = 2, legend = "topleft")
-```
