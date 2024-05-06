@@ -17,6 +17,7 @@ library(tidymodels)
 library(tidyclust)
 library(ggplot2)
 ```
+
 ```{r}
 library(readr)
 
@@ -61,7 +62,7 @@ str(filtered_qualtrics_data)
 
 filtered_qualtrics_data<- filtered_qualtrics_data %>% 
   mutate(participantID=row_number())
-view(filtered_qualtrics_data)
+# view(filtered_qualtrics_data)
 ```
 
 
@@ -120,7 +121,7 @@ average_ratings_by_style <- final_dataset %>%
   filter(!is.na(Rating) & !is.na(Style)) %>%
   group_by(Style) %>%
   summarize(
-    Average_Rating = mean(Rating, na.rm = TRUE),
+    Average_Rating = mean(Rating, na.rm = TRUE) - 50,
     SD_Rating = sd(Rating, na.rm = TRUE),
     n = n() 
   )
@@ -284,7 +285,7 @@ ggplot(clean_dataset, aes(x = Rating)) +
 recomm_data <- final_dataset %>% 
   select(participantID, ID, Rating)
 
-recomm_data %>% 
+recomm_data_wide <- recomm_data %>% 
   spread(ID, Rating) 
 ```
 
@@ -295,25 +296,70 @@ recomm_data %>%
 library(recommenderlab)
 
 
+ratings_data <- as(as.matrix(recomm_data_wide), "realRatingMatrix")
 
-ratings_data <- as(recomm_data, "realRatingMatrix")
-recommender_model <- Recommender(ratings_data, method = "UBCF")
+train <- ratings_data[1:75,]
 ```
 
 
 
 ```{r}
+scheme <- evaluationScheme(train, method = "cross-validation", k = 10, given = -5, goodRating = 50)
 
-recommendations <- predict(recommender_model, ratings_data[1:5], n = 5)
+algorithms <- list(
+  `random items` = list(name = "RANDOM", param = NULL), 
+  `popular items` = list(name = "POPULAR", param = NULL),
+  `user-based CF` = list(name = "UBCF", param = list(nn = 3)),
+  `item-based CF` = list(name = "IBCF", param = list(k = 10)),
+  `funk-svd-hd` = list(name ="SVDF", param = list(k = 10)),
+  `funk-svd-ld` = list(name ="SVDF", param = list(k = 3))
+  )
 
-recommendation_list <- as(recommendations, "list")
-print(recommendation_list)
+results <- evaluate(scheme, algorithms, type = "ratings", progress = FALSE)
+
+# plot(results, annotate = 2, legend = "topleft")
 ```
+
+All recommender approaches do better than random, so at least there's that. Funk-svd seems to do somewhat better than "popular"-based recommender systems. So there is some hint of personalizability here. 
+
 
 ```{r}
-evaluation_scheme <- evaluationScheme(ratings_data, method = "cross-validation", k = 5, given = 3, goodRating = 5)
 
-results <- evaluate(evaluation_scheme, method = "UBCF", n = 5)
-print(avg(results@results))
+library(stringr)
+
+
+get_MAE <- function(res){
+  map(res, ~.x[3])
+}
+
+res_getter <- function(results){
+  n <- names(results)
+  reslist <- lapply(results, getResults)
+  v <- map(reslist, get_MAE) %>% unlist()
+  
+  tibble(
+    alg = names(v),
+    val = v
+  ) %>% 
+    mutate(
+      fold = str_extract(alg, "\\d{1,2}(?!.*\\d{1,2})"),
+      alg = str_remove(alg, fold)
+      )
+    
+  # lapply(reslist, ~tibble(.x[1,]))
+}           
+
+res_getter(results) %>% 
+  ggplot(aes(x=alg, y = val)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(y = "MAE")
+
+# x <- lapply(results, getResults)
+# map2(names(results), results, ~as_tibble(getResults(.y)) %>% mutate(namez = .x))
 ```
+
+In terms of mean absolute error, funk-svd is on the order of 15-17. On a scale of 100 that's not *too* bad, but it's not super great -- perhaps more data is needed.
+
+
 
