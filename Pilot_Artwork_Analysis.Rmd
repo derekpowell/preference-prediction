@@ -317,7 +317,7 @@ algorithms <- list(
 
 results <- evaluate(scheme, algorithms, type = "ratings", progress = FALSE)
 
-# plot(results, annotate = 2, legend = "topleft")
+
 ```
 
 All recommender approaches do better than random, so at least there's that. Funk-svd seems to do somewhat better than "popular"-based recommender systems. So there is some hint of personalizability here. 
@@ -363,3 +363,71 @@ In terms of mean absolute error, funk-svd is on the order of 15-17. On a scale o
 
 
 
+### Hyperparameter tuning
+
+
+```{r}
+algorithms_h <- list(
+  `funk-svd-ld` = list(name ="SVDF", param = list(k = 3)),  
+ `low-lr-high-reg` = list(name = "SVDF", param = list(
+    k = 3,
+    lr_all = 0.0001,
+    reg_all = 0.02,
+    n_epochs = 50
+  )),
+  `medium-lr-medium-reg` = list(name = "SVDF", param = list(
+    k = 3,
+    lr_all = 0.0003,
+    reg_all = 0.015,
+    n_epochs = 50
+  )),
+  `high-lr-low-reg` = list(name = "SVDF", param = list(
+    k = 3,
+    lr_all = 0.0007,
+    reg_all = 0.01,
+    n_epochs = 50
+  )),
+  `low-lr-more-epochs` = list(name = "SVDF", param = list(
+    k = 3,
+    lr_all = 0.0001,
+    reg_all = 0.01,
+    n_epochs = 100
+  )),
+  `high-lr-more-epochs` = list(name = "SVDF", param = list(
+    k = 3,
+    lr_all = 0.0005,
+    reg_all = 0.005,
+    n_epochs = 100
+  ))
+)
+results_h <- evaluate(scheme, algorithms_h, type = "ratings", progress = FALSE)
+
+get_MAE <- function(res){
+  map(res, ~.x[3])
+}
+
+res_getter_h <- function(results_h){
+  n <- names(results_h)
+  reslist <- lapply(results_h, getResults)
+  v <- map(reslist, get_MAE) %>% unlist()
+  
+  tibble(
+    alg = names(v),
+    val = v
+  ) %>% 
+    mutate(
+      fold = str_extract(alg, "\\d{1,2}(?!.*\\d{1,2})"),
+      alg = str_remove(alg, fold)
+      )
+    
+  # lapply(reslist, ~tibble(.x[1,]))
+}           
+
+res_getter(results_h) %>% 
+  ggplot(aes(x=alg, y = val)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(y = "MAE")
+```
+
+I tried other tuning options but nothing performed better than the normal one. More extreme learning rates or regularization led to no results and there seems to be no gains from minor changes. 
