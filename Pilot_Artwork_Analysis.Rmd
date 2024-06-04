@@ -271,6 +271,26 @@ ggplot(clean_dataset, aes(x = Rating)) +
 
 
 ```
+```{r}
+
+
+Artworks1 <- Artworks %>%
+  mutate(ID = row_number())
+
+merged_data <- recomm_data %>%
+  left_join(Artworks1, by = "ID") %>%
+  select(-ID) %>%
+  rename("link to image" = "link to image")
+
+
+merged_data1<- merged_data%>%
+  select(participantID, Rating, "link to image")
+
+pivoted_qualdata <- merged_data1 %>%
+  pivot_wider(names_from = participantID, values_from = Rating, names_prefix = "participant_")
+
+print(pivoted_qualdata)
+```
 
 
 ## Recommender System
