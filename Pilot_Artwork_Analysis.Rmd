@@ -41,6 +41,13 @@ artworks <- Artworks
 ```
 
 
+```{r}
+qualtrics_data1 <- qualtrics_data %>%
+  slice(-c(3:8))
+view(qualtrics_data1)
+```
+
+
 ```{r setup}
 library(dplyr)
 
