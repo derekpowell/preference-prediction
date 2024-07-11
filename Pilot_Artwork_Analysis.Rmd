@@ -458,3 +458,152 @@ res_getter(results_h) %>%
 ```
 
 I tried other tuning options but nothing performed better than the normal one. More extreme learning rates or regularization led to no results and there seems to be no gains from minor changes. 
+
+
+
+
+Creating Target Profiles
+```{r target profile data preprocessing}
+
+artwork_legend <- artworks%>%
+  select(Artwork_ID, Title)
+
+target_ave <- left_join(average_ratings_by_piece, artwork_legend)
+
+full_target_df <- left_join(qualtrics_long, target_ave, by = join_by(Artwork_ID))
+
+full_target_df <- full_target_df%>%
+  select(participantID, Artwork_ID, Rating, Title, Average_Rating)
+```
+```{r eliminating cases with lots of 0 and 100 ratings}
+
+rating_proportions <- full_target_df %>%
+  filter(!is.na(Rating)) %>%
+  group_by(participantID) %>%
+  summarise(
+    Total_Ratings = n(),
+    Extreme_Ratings = sum(Rating == 0 | Rating == 100, na.rm = TRUE),
+    Proportion_Extreme = Extreme_Ratings / Total_Ratings
+  )
+
+exclude_participants <- rating_proportions %>%
+  filter(Proportion_Extreme > 0.75) %>%
+  pull(participantID)
+
+filtered_target_df <- full_target_df %>%
+  filter(!participantID %in% exclude_participants)
+
+print(filtered_target_df)
+
+```
+
+```{r calc ecentricity score}
+
+
+full_target_df <- full_target_df %>%
+  mutate(
+    Rating = as.numeric(Rating),
+    Average_Rating = as.numeric(Average_Rating)
+  )
+
+full_target_df1 <- full_target_df %>%
+  group_by(Artwork_ID) %>%
+  mutate(SD_Average = sd(Rating, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(SD_From_Average = ifelse(!is.na(Rating), abs((Rating - Average_Rating) / SD_Average), NA))
+
+
+full_target_df2 <- full_target_df1 %>%
+  group_by(Artwork_ID) %>%
+  mutate(SD_Average = sd(Rating, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(SD_From_Average = ifelse(!is.na(Rating), abs((Rating - Average_Rating) / SD_Average), NA))
+
+
+eccentricity_df <- full_target_df2 %>%
+  group_by(participantID) %>%
+  summarise(
+    Total_Ratings = n(),
+    High_SD_Ratings = sum(!is.na(SD_From_Average) & SD_From_Average >= 1.5)
+  ) %>%
+  mutate(Eccentricity_Score = High_SD_Ratings / Total_Ratings)
+
+
+full_target_df2 <- full_target_df2 %>%
+  left_join(eccentricity_df, by = "participantID")
+
+
+print(full_target_df2)
+
+
+```
+
+```{r descriptives of eccentricity score}
+
+eccentric_des <- full_target_df2 %>%
+  summarise(
+    Mean = mean(Eccentricity_Score, na.rm = TRUE),
+    Median = median(Eccentricity_Score, na.rm = TRUE),
+    SD = sd(Eccentricity_Score, na.rm = TRUE),
+    Min = min(Eccentricity_Score, na.rm = TRUE),
+    Max = max(Eccentricity_Score, na.rm = TRUE),
+    Q1 = quantile(Eccentricity_Score, 0.25, na.rm = TRUE),
+    Q3 = quantile(Eccentricity_Score, 0.75, na.rm = TRUE)
+  )
+
+print(eccentric_des)
+
+ggplot(full_target_df2, aes(x = participantID, y = Eccentricity_Score)) +
+  geom_point() +
+  labs(title = "Scatter Plot of ParticipantID by Eccentricity Score",
+       x = "Participant ID",
+       y = "Eccentricity Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+```
+```{r picking profiles}
+
+full_target_df2 <- full_target_df2 %>%
+  mutate(Eccentricity_Category = case_when(
+    Eccentricity_Score >= 0 & Eccentricity_Score < 0.05 ~ "0 - 0.05",
+    Eccentricity_Score >= 0.05 & Eccentricity_Score < 0.1 ~ "0.05 - 0.1",
+    Eccentricity_Score >= 0.1 & Eccentricity_Score < 0.15 ~ "0.1 - 0.15",
+    Eccentricity_Score >= 0.15 & Eccentricity_Score < 0.2 ~ "0.15 - 0.2",
+    Eccentricity_Score >= 0.2 ~ "0.2+",
+    TRUE ~ "NA"
+  ))
+
+category_counts <- full_target_df2 %>%
+  group_by(Eccentricity_Category) %>%
+  summarise(Participant_Count = n_distinct(participantID))
+
+
+print(category_counts)
+
+set.seed(1)
+random_participants <- full_target_df2 %>%
+  group_by(Eccentricity_Category) %>%
+  sample_n(1, weight = Eccentricity_Score) %>% 
+  select(participantID, Eccentricity_Category, Eccentricity_Score)
+
+
+print(random_participants)
+```
+
+```{r}
+target_profiles <- full_target_df2%>%
+  filter(participantID %in% c(160, 99, 235, 167))
+
+
+set.seed(1)
+target_paintings <- target_profiles %>%
+  filter(!is.na(Rating) & !is.na(Average_Rating)) %>%
+  group_by(participantID) %>%
+  sample_n(12, replace = FALSE) %>%
+  ungroup()
+
+
+print(target_paintings)
+```
+
