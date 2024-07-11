@@ -600,7 +600,7 @@ set.seed(1)
 target_paintings <- target_profiles %>%
   filter(!is.na(Rating) & !is.na(Average_Rating)) %>%
   group_by(participantID) %>%
-  sample_n(12, replace = FALSE) %>%
+  sample_n(13, replace = FALSE) %>%
   ungroup()
 
 
