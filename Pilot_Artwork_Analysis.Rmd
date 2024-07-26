@@ -42,9 +42,9 @@ artworks <- Artworks
 
 
 ```{r}
-qualtrics_data1 <- qualtrics_data %>%
+qualtrics_data <- qualtrics_data %>%
   slice(-c(3:8))
-view(qualtrics_data1)
+view(qualtrics_data)
 ```
 
 
@@ -69,7 +69,7 @@ str(filtered_qualtrics_data)
 
 filtered_qualtrics_data<- filtered_qualtrics_data %>% 
   mutate(participantID=row_number())
-# view(filtered_qualtrics_data)
+ view(filtered_qualtrics_data)
 ```
 
 
@@ -89,7 +89,7 @@ qualtrics_long <- filtered_qualtrics_data %>%
   mutate(Artwork_ID = as.numeric(Artwork_ID))  
 
 
-head(qualtrics_long)
+view(qualtrics_long)
 ```
 
 
@@ -466,15 +466,31 @@ Creating Target Profiles
 ```{r target profile data preprocessing}
 
 artwork_legend <- artworks%>%
-  select(Artwork_ID, Title)
+  select(Artwork_ID, Title, Style)
 
 target_ave <- left_join(average_ratings_by_piece, artwork_legend)
 
 full_target_df <- left_join(qualtrics_long, target_ave, by = join_by(Artwork_ID))
 
 full_target_df <- full_target_df%>%
-  select(participantID, Artwork_ID, Rating, Title, Average_Rating)
+  select(participantID, Artwork_ID, Rating, Title, Average_Rating, Style)
+
+full_target_df <- full_target_df %>%
+  mutate(Style = case_when(
+    Style %in% c("Baroque", "Rococo", "Romanticism") ~ "Baroque",
+    Style %in% c("Constructivism", "Art Informel") ~ "Art Informel",
+    Style %in% c("Art Nouveau", "Expressionism") ~ "Expressionism",
+    Style %in% c("Pop Art", "Op Art") ~ "Pop Art",
+    Style %in% c("Abstract Art", "Surrealism", "Cubism") ~ "Abstract",
+    Style %in% c("Spatialism", "Minimalism") ~ "Minimalism",
+    TRUE ~ Style
+  ))
 ```
+
+```{r}
+  unique(full_target_df$Style)
+```
+
 ```{r eliminating cases with lots of 0 and 100 ratings}
 
 rating_proportions <- full_target_df %>%
@@ -487,7 +503,7 @@ rating_proportions <- full_target_df %>%
   )
 
 exclude_participants <- rating_proportions %>%
-  filter(Proportion_Extreme > 0.75) %>%
+  filter(Proportion_Extreme > 0.50) %>%
   pull(participantID)
 
 filtered_target_df <- full_target_df %>%
@@ -566,11 +582,11 @@ ggplot(full_target_df2, aes(x = participantID, y = Eccentricity_Score)) +
 
 full_target_df2 <- full_target_df2 %>%
   mutate(Eccentricity_Category = case_when(
-    Eccentricity_Score >= 0 & Eccentricity_Score < 0.05 ~ "0 - 0.05",
+    Eccentricity_Score >= 0 & Eccentricity_Score < 0.025 ~ "0 - 0.025",
+    Eccentricity_Score >= 0.025 & Eccentricity_Score < 0.05 ~ "0.025 - 0.05",
     Eccentricity_Score >= 0.05 & Eccentricity_Score < 0.1 ~ "0.05 - 0.1",
     Eccentricity_Score >= 0.1 & Eccentricity_Score < 0.15 ~ "0.1 - 0.15",
-    Eccentricity_Score >= 0.15 & Eccentricity_Score < 0.2 ~ "0.15 - 0.2",
-    Eccentricity_Score >= 0.2 ~ "0.2+",
+    Eccentricity_Score >= 0.15 ~ "0.15+",
     TRUE ~ "NA"
   ))
 
@@ -581,7 +597,7 @@ category_counts <- full_target_df2 %>%
 
 print(category_counts)
 
-set.seed(1)
+set.seed(4)
 random_participants <- full_target_df2 %>%
   group_by(Eccentricity_Category) %>%
   sample_n(1, weight = Eccentricity_Score) %>% 
@@ -593,17 +609,128 @@ print(random_participants)
 
 ```{r}
 target_profiles <- full_target_df2%>%
-  filter(participantID %in% c(160, 99, 235, 167))
+  filter(participantID %in% c(278, 160, 195, 63, 10))
 
 
 set.seed(1)
 target_paintings <- target_profiles %>%
   filter(!is.na(Rating) & !is.na(Average_Rating)) %>%
   group_by(participantID) %>%
-  sample_n(13, replace = FALSE) %>%
   ungroup()
 
 
 print(target_paintings)
 ```
+```{r test participant 10}
+target10<- target_paintings%>%
+  filter(participantID == 10)
 
+set.seed(123)
+sampled_10 <- target10 %>%
+  group_by(Style) %>%
+  sample_n(size = 2, replace = FALSE) %>%
+  ungroup()
+```
+
+```{r test participant 160}
+target160<- target_paintings%>%
+  filter(participantID == 160)
+
+set.seed(123)
+sampled_160 <- target160 %>%
+  group_by(Style) %>%
+  sample_n(size = 2, replace = FALSE) %>%
+  ungroup()
+```
+
+
+```{r test participant 195}
+target195<- target_paintings%>%
+  filter(participantID == 195)
+
+set.seed(123)
+sampled_195 <- target195 %>%
+  group_by(Style) %>%
+  sample_n(size = 2, replace = FALSE) %>%
+  ungroup()
+```
+
+
+```{r test participant 270}
+library(dplyr)
+
+# Function to check if a participant can fulfill the conditions
+can_fulfill_conditions <- function(data, participant_id) {
+  filtered_data <- data %>%
+    filter(participantID == participant_id & Eccentricity_Category >= 0.05 & Eccentricity_Category <= 0.1)
+  
+  if (n_distinct(filtered_data$Style) < length(unique(data$Style))) {
+    return(FALSE)
+  }
+  
+  sufficient_rows <- filtered_data %>%
+    group_by(Style) %>%
+    summarise(count = n()) %>%
+    filter(count >= 2)
+  
+  return(nrow(sufficient_rows) == length(unique(data$Style)))
+}
+
+# Function to sample rows for a valid participant
+sample_rows_for_valid_participant <- function(data) {
+  valid_participant <- NULL
+  
+  for (participant in unique(data$participantID)) {
+    if (can_fulfill_conditions(data, participant)) {
+      valid_participant <- participant
+      break
+    }
+  }
+  
+  if (is.null(valid_participant)) {
+    stop("No participant can fulfill the conditions.")
+  }
+  
+  set.seed(123)
+  sampled_data <- data %>%
+    filter(participantID == valid_participant & Eccentricity_Category == "0.05 - 0.1") %>%
+    group_by(Style) %>%
+    sample_n(size = 2, replace = FALSE) %>%
+    ungroup()
+  
+  return(sampled_data)
+}
+
+# Apply the function to your data
+sampled_data <- sample_rows_for_valid_participant(target_paintings)
+print(sampled_data)
+
+```
+
+```{r test participant 270}
+target270<- target_paintings%>%
+  filter(participantID == 270)
+
+set.seed(123)
+sampled_270 <- target270 %>%
+  group_by(Style) %>%
+  sample_n(size = 3, replace = TRUE) %>%
+  ungroup()
+
+sampled_270 <- sampled_270 %>%
+  distinct(Title, .keep_all = TRUE)
+
+print(sampled_270)
+```
+
+
+```{r test participant 278}
+target278<- target_paintings%>%
+  filter(participantID == 278)
+
+set.seed(123)
+sampled_278 <- target278 %>%
+  group_by(Style) %>%
+  sample_n(size = 2, replace = FALSE) %>%
+  ungroup()
+```
