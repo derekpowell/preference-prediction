@@ -466,14 +466,14 @@ Creating Target Profiles
 ```{r target profile data preprocessing}
 
 artwork_legend <- artworks%>%
-  select(Artwork_ID, Title, Style)
+  select(Artwork_ID, Title, Style, "link to image")
 
 target_ave <- left_join(average_ratings_by_piece, artwork_legend)
 
 full_target_df <- left_join(qualtrics_long, target_ave, by = join_by(Artwork_ID))
 
 full_target_df <- full_target_df%>%
-  select(participantID, Artwork_ID, Rating, Title, Average_Rating, Style)
+  select(participantID, Artwork_ID, Rating, Title, Average_Rating, Style, "link to image")
 
 full_target_df <- full_target_df %>%
   mutate(Style = case_when(
@@ -597,7 +597,7 @@ category_counts <- full_target_df2 %>%
 
 print(category_counts)
 
-set.seed(4)
+set.seed(6)
 random_participants <- full_target_df2 %>%
   group_by(Eccentricity_Category) %>%
   sample_n(1, weight = Eccentricity_Score) %>% 
@@ -608,8 +608,7 @@ print(random_participants)
 ```
 
 ```{r}
-target_profiles <- full_target_df2%>%
-  filter(participantID %in% c(278, 160, 195, 63, 10))
+target_profiles <- full_target_df2
 
 
 set.seed(1)
@@ -621,12 +620,12 @@ target_paintings <- target_profiles %>%
 
 print(target_paintings)
 ```
-```{r test participant 10}
-target10<- target_paintings%>%
-  filter(participantID == 10)
+```{r test participant 246}
+target246<- target_paintings%>%
+  filter(participantID == 246)
 
 set.seed(123)
-sampled_10 <- target10 %>%
+sampled_246 <- target246 %>%
   group_by(Style) %>%
   sample_n(size = 2, replace = FALSE) %>%
   ungroup()
@@ -705,6 +704,7 @@ sample_rows_for_valid_participant <- function(data) {
 sampled_data <- sample_rows_for_valid_participant(target_paintings)
 print(sampled_data)
 
+sampled_15 <- sampled_data
 ```
 
 ```{r test participant 270}
@@ -720,6 +720,8 @@ sampled_270 <- target270 %>%
 sampled_270 <- sampled_270 %>%
   distinct(Title, .keep_all = TRUE)
 
+sampled_270 <- sampled_270[-c(8, 13, 20, 23, 26), ]
+
 print(sampled_270)
 ```
 
@@ -734,3 +736,12 @@ sampled_278 <- target278 %>%
   sample_n(size = 2, replace = FALSE) %>%
   ungroup()
 ```
+
+
+
+```{r}
+sampled_270%>%
+  select("link to image") %>%
+  view()
+```
+
