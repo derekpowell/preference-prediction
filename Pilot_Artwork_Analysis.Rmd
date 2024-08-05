@@ -740,7 +740,7 @@ sampled_278 <- target278 %>%
 
 
 ```{r}
-sampled_270%>%
+sampled_data%>%
   select("link to image") %>%
   view()
 ```
