@@ -745,3 +745,92 @@ sampled_data%>%
   view()
 ```
 
+
+
+Fixing up final study data
+
+```{r}
+read_qualtrics <- function(fname){
+  colnames <- colnames(read_csv(fname))
+  survey_q <- read_csv(fname, skip = 4, col_names = colnames)
+  return(survey_q)
+}
+  
+d <- read_qualtrics("long_data.csv") %>% 
+  select(-ParticipantID)
+
+metadata <- read_csv("long_data.csv", skip = 1) %>%
+  #select(-ParticipantID) %>% 
+  head(2)
+
+target_nums <- str_extract(colnames(metadata), "(\\d*)\\.\\.\\.", group = 1)
+rating_type <- metadata %>% slice(1) %>% unlist(use.names=FALSE)
+artwork <- metadata %>% slice(2) %>% unlist(use.names=FALSE)
+
+# paste(target_nums, rating_type, artwork, sep='_')
+
+colnames(d) <- paste(target_nums, rating_type, artwork, sep='_')
+# target_nums <- colnames(metadata)
+
+dwide <- d %>% 
+  mutate(particpantID = 1:n())
+
+dlong <- dwide %>% 
+  pivot_longer(
+    cols = -particpantID,
+    names_to = c("rating_subj", "rating_type", "artwork"),
+    names_pattern = "(.*)_(.*)_(.*)",
+    values_to = "rating"
+  ) %>% 
+  drop_na()
+
+dlong
+```
+```{r}
+sampled_15$participantID <- (sampled_15$participantID *0 +15)
+# Assuming your dataframes are named sampled_1, sampled_2, sampled_3, etc.
+actual_ratings <- do.call(rbind, list(sampled_15, sampled_160, sampled_246, sampled_270))
+
+```
+
+```{r}
+
+actual_ratings <- merge(actual_ratings, artworks[, c("Title", "link to image")], by = "Title", all.x = TRUE)
+
+```
+
+```{r}
+actual_ratings$rating_subj <- actual_ratings$participantID
+
+```
+```{r}
+
+actual_ratings$particpantID <- actual_ratings$participantID * 10
+
+```
+```{r renaming}
+actual_ratings <- actual_ratings %>%
+  rename(artwork = 'link to image.y')%>%
+  rename(rating = 'Rating')
+```
+```{r}
+
+actual_ratings$rating_type <- "Actual"
+
+```
+
+```{r}
+actual_ratings1 <- actual_ratings%>%
+  select(particpantID, rating, rating_subj, rating_type, artwork)
+
+dlonger <- rbind(dlong, actual_ratings1)
+
+```
+
+```{r}
+library(readr)
+gptdata <- read_csv("preference-prediction/gptdata.csv")
+View(gptdata)
+```
+
+
