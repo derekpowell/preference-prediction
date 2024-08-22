@@ -829,8 +829,87 @@ dlonger <- rbind(dlong, actual_ratings1)
 
 ```{r}
 library(readr)
-gptdata <- read_csv("preference-prediction/gptdata.csv")
-View(gptdata)
+gptdata <- read_csv("gptdata.csv")
+
+gptdata<-gptdata%>%
+  rename(participantID= particpantID)
+
+gptdata <- gptdata %>%
+  mutate(artwork = trimws(artwork))
+```
+```{r}
+gptdata <- gptdata %>%
+  mutate(rating_subj = ifelse(rating_subj %in% c(150, 2700, 2460, 1600), rating_subj / 10, rating_subj))
+
+actual_ratings_df <- gptdata %>%
+  filter(rating_type == "Actual") %>%
+  select(rating_subj, artwork, actual_ratings = rating)
+
+gptdata1 <- gptdata %>%
+  left_join(actual_ratings_df, by = c("rating_subj", "artwork"))
+
+gptdata1 <- gptdata1 %>%
+  mutate(rating_subj = ifelse(rating_subj == 160, 154, rating_subj))
+gptdata1 <- gptdata1 %>%
+  mutate(rating_subj = ifelse(rating_subj == 246, 252, rating_subj))
+gptdata1 <- gptdata1 %>%
+  mutate(rating_subj = ifelse(rating_subj == 270, 276, rating_subj))
+
+head(gptdata1)
+```
+```{r}
+target_paintings<- target_paintings%>%
+  rename(artwork = 'link to image')%>%
+  rename(actual_rating = Rating)%>%
+  rename(rating_subj=participantID)
+```
+```{r}
+gptdata1 <- gptdata1 %>%
+  mutate(across(c(rating_subj, artwork), trimws))
+
+target_paintings <- target_paintings %>%
+  mutate(across(c(rating_subj, artwork), trimws))
+
+
+gptdata2 <- gptdata1 %>%
+  left_join(target_paintings %>% select(rating_subj, artwork, actual_rating), 
+            by = c("rating_subj", "artwork"))
+
+
 ```
 
+```{r preliminary data analysis with target 15}
+gptdata15 <- gptdata1%>%
+  filter(rating_subj==15)
+
+target_data <- gptdata15 %>%
+  filter(rating_type == "Target")
+
+accuracy_by_artwork <- target_data %>%
+  group_by(artwork) %>%
+  summarize(MAE = mean(abs(rating - actual_ratings), na.rm = TRUE))
+
+print(accuracy_by_artwork)
+
+accuracy_by_participant <- target_data %>%
+  group_by(participantID) %>%
+  summarize(MAE = mean(abs(rating - actual_ratings), na.rm = TRUE))
+
+
+print(accuracy_by_participant)
+
+participant0_MAE <- target_data %>%
+  filter(participantID == 0) %>%
+  summarize(MAE = mean(abs(rating - actual_ratings), na.rm = TRUE)) %>%
+  pull(MAE)
+
+other_participants_MAE <- target_data %>%
+  filter(participantID != 0) %>%
+  summarize(MAE = mean(abs(rating - actual_ratings), na.rm = TRUE)) %>%
+  pull(MAE)
+
+
+print(paste("MAE for ChatGPT:", participant0_MAE))
+print(paste("MAE for all other participants:", other_participants_MAE))
+```
 
