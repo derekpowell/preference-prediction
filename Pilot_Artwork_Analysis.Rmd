@@ -317,15 +317,33 @@ recomm_data_wide <- recomm_data %>%
 ```
 
 
+```{r}
+
+recomm_data_wide_filtered <- recomm_data_wide %>% 
+  pivot_longer(-participantID) %>% 
+  group_by(participantID) %>% 
+  filter(sum(!is.na(value)) == 60) %>% 
+  spread(name, value)
+recomm_data_wide_filtered
+```
+
 
 ```{r}
 
 library(recommenderlab)
 
+zscore <- function(x){
+  (x - mean(x, na.rm=TRUE))/sd(x, na.rm=TRUE)
+}
 
-ratings_data <- as(as.matrix(recomm_data_wide), "realRatingMatrix")
+x <- recomm_data_wide_filtered %>% 
+  ungroup() #%>% 
+  # mutate(across(-"participantID", zscore))
 
-train <- ratings_data[1:75,]
+
+ratings_data <- as(as.matrix(x %>% select(-participantID)), "realRatingMatrix")
+
+train <- ratings_data[1:250,]
 ```
 
 
@@ -460,6 +478,7 @@ res_getter(results_h) %>%
 I tried other tuning options but nothing performed better than the normal one. More extreme learning rates or regularization led to no results and there seems to be no gains from minor changes. 
 
 
+<<<<<<< Updated upstream
 
 
 Creating Target Profiles
@@ -911,5 +930,47 @@ other_participants_MAE <- target_data %>%
 
 print(paste("MAE for ChatGPT:", participant0_MAE))
 print(paste("MAE for all other participants:", other_participants_MAE))
+=======
+```{r}
+# jsut doing it with funks-vd
+
+
+```
+
+```{r}
+get_item_embeddings <- function(rec_result, rec_data){
+  mod <- getModel(rec_result)
+  mat <- mod$svd$V
+
+  d <- mat %>% 
+    as_tibble() %>% 
+    mutate(item = colnames(rec_data)) %>% 
+    relocate(item)
+  
+  return(d)
+}
+
+get_user_embeddings <- function(rec_result){
+  mod <- getModel(rec_result)
+  return(mod$svd$U)
+}
+```
+
+
+```{r}
+svfd <- Recommender(train, "SVDF", parameter = list(k = 3))
+embeddings <- get_item_embeddings(svfd, train)
+
+embeddings
+```
+
+Matt: can you explore what paintings are similar based on these representations, matching that up to the painting IDs and sanity check if it at all seems like this is tracking how similar the paintings actually are? Here they are joined up so you can match them.
+
+```{r}
+final_dataset %>% 
+  distinct(Artwork_ID, Title) %>% 
+  mutate(Artwork_ID = as.character(Artwork_ID)) %>% 
+  left_join(embeddings, by = c("Artwork_ID"="item"))
+>>>>>>> Stashed changes
 ```
 

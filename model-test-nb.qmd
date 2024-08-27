@@ -1,0 +1,165 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+df_raw <- read_csv("complete_thesis_data.csv") %>% 
+  filter(rating_type != "Actual")
+artworks <- read_csv("artwork-embeddings.csv")
+
+artworks <- artworks %>% 
+  pivot_longer(cols = matches("V[0-9]")) %>% 
+  group_by(item,Title,Artist,Style,Genre,piclink,imglink) %>% 
+  summarize(
+    embedding = list(value)
+  )
+
+
+df_all <- df_raw %>% 
+  group_by(participantID) %>% 
+  filter(n() >= 40) %>%  # some have 40- and some 42 -- was this a bug in qualtrics or data processing?
+  ungroup() %>% 
+  rename(profile = rating_subj) %>% 
+  pivot_wider(
+    names_from = "rating_type",
+    values_from = c("rating")
+  ) %>% 
+  rename(
+    predicted = Target,
+    recommender_rating = SelfRate,
+    profile_rating = actual_rating
+    ) %>% 
+  select(participantID, profile, artwork, predicted, recommender_rating, profile_rating)
+
+
+
+ df_all <- artworks %>% 
+  right_join(df_all, by = c("imglink" = "artwork"))
+
+df <- df_all %>% 
+  drop_na(predicted)
+
+df_similarities <- df_all %>% 
+  filter(is.na(predicted)) %>% 
+  filter(participantID != 0) %>% 
+  group_by(participantID) %>% 
+  mutate(
+    pr_l2 = profile_rating / sqrt(sum(profile_rating^2)),
+    rec_l2 = recommender_rating / sqrt(sum(recommender_rating^2))
+  ) %>% 
+  summarize(
+    euc_dist = sqrt(sum(pr_l2 - rec_l2)^2),
+    cos_sim = sum(profile_rating * recommender_rating) / (sqrt(sum(profile_rating^2)) * sqrt(sum(recommender_rating^2)))
+    )
+
+df <- left_join(df, df_similarities, by = "participantID")
+```
+
+## quick EDA
+
+```{r}
+df %>% 
+  filter(participantID != 0) %>%  # remove chatgpt
+  group_by(participantID, profile) %>% 
+  summarize(mae = mean(abs(predicted - profile_rating))) %>% 
+  ggplot(aes(x=mae)) +
+  geom_histogram() +
+  facet_wrap(~profile) +
+  xlim(0, 100)
+```
+
+```{r}
+df %>% 
+  filter(participantID != 0) %>%  # remove chatgpt
+  group_by(participantID, profile) %>% 
+  summarize(corr = cor(predicted, profile_rating)) %>% 
+  ggplot(aes(x=corr)) +
+  geom_histogram() +
+  facet_wrap(~profile) +
+  xlim(-1, 1)
+```
+
+## Computing similarity
+
+profile 21 has an extra painting? or missed having Ps predict for one?
+
+```{r}
+df_all %>% 
+  filter(participantID != 0) %>% 
+  group_by(profile, participantID) %>% 
+  group_by(profile) %>% 
+  # summarize(max(n))
+  filter(is.na(predicted)) %>% 
+  distinct(profile, item, .keep_all = TRUE) %>% 
+  select(profile, item, embedding) %>% 
+  arrange(profile, item) %>% 
+  group_by(profile) %>% view()
+  # summarize(emb_list = list(embedding))
+
+df_all %>% 
+  filter(participantID != 0) %>% 
+  group_by(profile, participantID) %>% 
+  filter(n() >=23) %>% 
+  filter(is.na(predicted)) %>% 
+  ungroup() %>% 
+  distinct(profile, item, .keep_all = TRUE) %>% 
+  select(profile, item, profile_rating, embedding) %>% 
+  arrange(profile, item) %>% 
+  group_by(profile) %>% 
+  mutate(example_num = 1:n()) %>% 
+  select(-item) %>% 
+  pivot_wider(
+    names_from = example_num,
+    values_from = c(profile_rating, embedding)
+  )
+  
+```
+
+```{r}
+df
+```
+
+```{r}
+IDs <- unique(df$participantID)
+
+fit_model <- function(pid){
+  d <- df %>% 
+    filter(participantID == pid)
+  return(lm(predicted ~ recommender_rating, d))
+}
+
+models <- lapply(IDs, fit_model)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+hist(map_dbl(models, get_R2))
+  
+```
+
+```{r}
+IDs <- df %>% filter(participantID != 0) %>% drop_na(cos_sim) %>% pull(participantID) %>% unique()
+
+fit_model <- function(pid){
+  d <- df %>% 
+    filter(participantID == pid)
+  return(lm(predicted ~ recommender_rating * cos_sim, d))
+}
+
+models <- lapply(IDs, fit_model)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+hist(map_dbl(models, get_R2))
+```
+
