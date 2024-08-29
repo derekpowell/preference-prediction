@@ -384,6 +384,7 @@ Huh, don't think this is gonna be significant ...
 df_with_fits %>% 
   ungroup() %>% 
   mutate(mod_beta = map_dbl(models_ego, get_beta)) %>% 
+  filter(participantID > 0) %>% 
   filter(best_model == "ego") %>% 
   ggplot(aes(x=cos_sim, y = mod_beta)) +
   geom_point() +
