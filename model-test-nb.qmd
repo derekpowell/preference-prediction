@@ -5,6 +5,7 @@ format: html
 
 ```{r}
 library(tidyverse)
+library(minpack.lm)
 ```
 
 ```{r}
@@ -58,9 +59,23 @@ df_similarities <- df_all %>%
     )
 
 df <- left_join(df, df_similarities, by = "participantID")
+
+
+df_centered <- df %>% 
+  filter(participantID > 0) %>% 
+  # mutate(
+  #   cos_sim = if_else(participantID==0, 0, cos_sim),
+  #   euc_dist = if_else(participantID==0, 0, euc_dist),
+  #   ) %>% 
+  # mutate(participantID = if_else(participantID==0, -profile, participantID)) %>% 
+  drop_na(cos_sim, euc_dist) %>% 
+  group_by(participantID) %>% 
+  mutate(across(c(predicted, recommender_rating, profile_rating), .fns = ~.x-mean(.x, na.rm=TRUE)))
 ```
 
 ## quick EDA
+
+How well do Ps do in predicting the ratings? We can quantify their mean absolute error.
 
 ```{r}
 df %>% 
@@ -73,6 +88,8 @@ df %>%
   xlim(0, 100)
 ```
 
+And the correlation between their predicted ratings and the true ratings.
+
 ```{r}
 df %>% 
   filter(participantID != 0) %>%  # remove chatgpt
@@ -84,9 +101,27 @@ df %>%
   xlim(-1, 1)
 ```
 
-## Computing similarity
 
-profile 21 has an extra painting? or missed having Ps predict for one?
+## How well do people predict?
+
+```{r}
+df_centered %>% 
+  # filter(participantID > 0) %>% 
+  # group_by(participantID) %>% 
+  mutate(corr = cor(predicted, profile_rating)) %>% 
+  ungroup() %>% 
+  mutate(corank = dense_rank(corr)) %>% 
+  ggplot(aes(x=predicted, y = profile_rating)) +
+  geom_point() +
+  facet_wrap(~reorder(participantID, -corank)) +
+  theme(aspect.ratio = 1)
+```
+
+## Computing similarity 
+
+**note:** profile 21 has an extra painting? or missed having Ps predict for one?
+
+This computes the similarity between each reference painting (rated) and the target painting (to be predicted).
 
 ```{r}
 df_all %>% 
@@ -126,20 +161,13 @@ prof_ratings <- df_all %>%
 df
 ```
 
+
+# Modeling: Ego-based
+
+First, a model assuming Ps just predict for the target what they would rate themselves.
+
 ```{r}
-IDs <- unique(df$participantID)
-
-df_centered <- df %>% 
-  mutate(
-    cos_sim = if_else(participantID==0, 0, cos_sim),
-    euc_dist = if_else(participantID==0, 0, euc_dist),
-    ) %>% 
-  mutate(participantID = if_else(participantID==0, -profile, participantID)) %>% 
-  drop_na(cos_sim, euc_dist) %>% 
-  group_by(participantID) %>% 
-  mutate(across(c(predicted, recommender_rating, profile_rating), .fns = ~.x-mean(.x, na.rm=TRUE)))
-
-IDs <- unique(df_centered$participantID)
+IDs <- sort(unique(df_centered %>% pull(participantID)))
 
 fit_model_ego <- function(pid){
   d <- df_centered %>% 
@@ -163,52 +191,78 @@ hist(map_dbl(models_ego, get_R2))
   
 ```
 
-Checkign if cosine similarity of recommender to profile is positively associated with the derived beta weight on participant's own ratings. This would be a sign people are sensitive to how similar they themselves appear to be to the profile? Looking not so good, but Could filter this for, among those for whom this explains their data well ...
+Checking if cosine similarity of recommender to profile is positively associated with the derived beta weight on participant's own ratings. This would be a sign people are sensitive to how similar they themselves appear to be to the profile? Oh, looks like yes?
 
 ```{r}
-df %>% 
+df_centered %>% 
+  arrange(participantID) %>% 
   ungroup() %>% 
-  filter(participantID >= 0) %>% 
   distinct(participantID, .keep_all = TRUE) %>% 
-  mutate(mod_beta = map_dbl(models, get_beta)) %>% 
+  mutate(mod_beta = map_dbl(models_ego, get_beta)) %>% 
+  filter(participantID >= 0) %>% 
   ggplot(aes(x=cos_sim, y = mod_beta)) +
   geom_point() +
-  geom_smooth(method = "lm")
+  geom_smooth(method = "lm") +
+  facet_wrap(~profile)
+
+df_centered %>% 
+  arrange(participantID) %>% 
+  ungroup() %>% 
+  distinct(participantID, .keep_all = TRUE) %>% 
+  mutate(mod_beta = map_dbl(models_ego, get_beta)) %>% 
+  filter(participantID >= 0) %>% 
+  ggplot(aes(x=euc_dist, y = mod_beta)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_wrap(~profile)
 ```
 
 
 
-## Allocentric model
+## Allocentric models
 
-A bunch of versions of these ...
+A bunch of versions of these are possible. 
 
-if similarities are all positive weights ...
+One idea could be:
+
 $$
-y = \alpha + \beta \frac{1}{\sum_i S(t, p_i)} \sum_i r_i \cdot S(t, p_i)
+y_t = \alpha + \beta \frac{1}{\sum_i S(t, p_i)} \sum_i r_i \cdot S(t, p_i)
 $$
+
+Note: negative weights will predict negative values, so a high score on a dissimilar painting will lead to predicting a lower score. For this reason, I use euclidean distance.
+
 
 ```{r}
+standardize <- function(x){
+  (x - mean(x))/sd(x)
+}
+
+eucnorm <- function(x) sqrt(sum(x^2))
+
+
+euc_sim_list <- function(l1, l2){
+  l1 <- as.numeric(l1)
+  l2 <- as.numeric(l2)
+  2 - sqrt(sum((l1/eucnorm(l1) - l2/eucnorm(l2))^2))
+}
 
 cos_sim_list <- function(l1, l2){
   l1 <- as.numeric(l1)
   l2 <- as.numeric(l2)
   sum(l1 * l2) / (sqrt(sum(l1^2)) * sqrt(sum(l2^2)))
-  
 }
 
-
-
-fit_model_allo <- function(pid){
+fit_model_allo <- function(pid, simfunc = euc_sim_list){
   d <- df_centered %>% 
     filter(participantID == pid) %>% 
     left_join(prof_ratings, by = "profile") %>% 
     mutate(
-      sim_1 = map2_dbl(embedding, embedding_1, cos_sim_list),
-      sim_2 = map2_dbl(embedding, embedding_2, cos_sim_list),
-      sim_3 = map2_dbl(embedding, embedding_3, cos_sim_list),
-      sim_4 = map2_dbl(embedding, embedding_4, cos_sim_list),
-      sim_5 = map2_dbl(embedding, embedding_5, cos_sim_list),
-      sim_6 = map2_dbl(embedding, embedding_6, cos_sim_list)
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
     ) %>% 
     mutate(
       rweighted = (profile_rating_1 * sim_1 + profile_rating_2 * sim_2 + profile_rating_3 * sim_3 + profile_rating_4 * sim_4 + profile_rating_5 * sim_5 + profile_rating_6 * sim_6)/(sim_1 + sim_2 + sim_3 + sim_4 + sim_5 + sim_6)
@@ -234,7 +288,61 @@ hist(map_dbl(models_allo, get_R2))
 
 
 
-Could do a "take the best" version too
+### negative similarities
+
+Can also allow negative similarities.
+
+```{r}
+# clamp <- function(x, a=0, b=Inf) {
+#     pmax(a, pmin(x, b) )
+# }
+
+
+
+fit_model_allo_neg <- function(pid, simfunc = euc_sim_list){
+  d <<- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    )# %>% 
+    # mutate(across(contains('sim_'), clamp)) %>%
+    # mutate(
+    #   rweighted = (profile_rating_1 * sim_1 + profile_rating_2 * sim_2 + profile_rating_3 * sim_3 + profile_rating_4 * sim_4 + profile_rating_5 * sim_5 + profile_rating_6 * sim_6)/(sim_1 + sim_2 + sim_3 + sim_4 + sim_5 + sim_6)
+  
+  fit <- nlsLM(predicted ~ b + z * (profile_rating_1 * (sim_1 - a) + profile_rating_2 * (sim_2 - a) + profile_rating_3 * (sim_3 - a) + profile_rating_4 * (sim_4 - a) + profile_rating_5 * (sim_5 - a) + profile_rating_6 * (sim_6 - a) )/(sim_1 + sim_2 + sim_3 + sim_4 + sim_5 + sim_6), d, start=list(a=1, b=0, z = 1), algorithm="port", 
+    lower=c(0, -100, -100), upper=c(2,100, 100))
+     
+  return(fit)
+}
+
+models_allo_neg <- lapply(IDs, fit_model_allo_neg)
+
+get_R2_nls <- function(mod){
+  preds <- predict(mod)
+  y <- preds + resid(mod)
+  return(cor(preds, y)^2)
+}
+
+hist(map_dbl(models_allo_neg, get_R2_nls))
+```
+
+
+```{r}
+get_zeropoint_par <- function(mod){
+  coef(mod)[1]
+}
+
+hist(map_dbl(models_allo_neg, get_zeropoint_par))
+```
+
+
+Could do a "take the best" version too (this notation is wrong!)
 
 $$
 y = \alpha + \beta \big( r_i \cdot S_{max}(t, p_i)\big)
@@ -242,17 +350,17 @@ $$
 
 ```{r}
 
-fit_model_allobest_weighted <- function(pid){
+fit_model_allobest_weighted <- function(pid, simfunc = euc_sim_list){
   d <- df_centered %>% 
     filter(participantID == pid) %>% 
     left_join(prof_ratings, by = "profile") %>% 
     mutate(
-      sim_1 = map2_dbl(embedding, embedding_1, cos_sim_list),
-      sim_2 = map2_dbl(embedding, embedding_2, cos_sim_list),
-      sim_3 = map2_dbl(embedding, embedding_3, cos_sim_list),
-      sim_4 = map2_dbl(embedding, embedding_4, cos_sim_list),
-      sim_5 = map2_dbl(embedding, embedding_5, cos_sim_list),
-      sim_6 = map2_dbl(embedding, embedding_6, cos_sim_list)
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
     ) %>% 
     mutate(
       max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
@@ -292,19 +400,20 @@ get_beta <- function(mod){
 hist(map_dbl(models_allobestweighted, get_R2))
 ```
 
+And another version where we ignore the similarity weight, just use the predicted value for most similar item.
 
 ```{r}
-fit_model_allobest_unweighted <- function(pid){
+fit_model_allobest_unweighted <- function(pid, simfunc = euc_sim_list){
   d <- df_centered %>% 
     filter(participantID == pid) %>% 
     left_join(prof_ratings, by = "profile") %>% 
     mutate(
-      sim_1 = map2_dbl(embedding, embedding_1, cos_sim_list),
-      sim_2 = map2_dbl(embedding, embedding_2, cos_sim_list),
-      sim_3 = map2_dbl(embedding, embedding_3, cos_sim_list),
-      sim_4 = map2_dbl(embedding, embedding_4, cos_sim_list),
-      sim_5 = map2_dbl(embedding, embedding_5, cos_sim_list),
-      sim_6 = map2_dbl(embedding, embedding_6, cos_sim_list)
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
     ) %>% 
     mutate(
       max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
@@ -340,34 +449,128 @@ hist(map_dbl(models_allobest_unweighted, get_R2))
 ```
 
 
+```{r}
+fit_model_allo_minmax <- function(pid, simfunc = euc_sim_list){
+  d <- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    ) %>% 
+    mutate(
+      max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
+      min_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), min),
+      unweighted_closest_rating = case_when(
+        max_sim == sim_1 ~ profile_rating_1,
+        max_sim == sim_2 ~ profile_rating_2,
+        max_sim == sim_3 ~ profile_rating_3,
+        max_sim == sim_4 ~ profile_rating_4,
+        max_sim == sim_5 ~ profile_rating_5,
+        max_sim == sim_6 ~ profile_rating_6,
+      ),
+      unweighted_furthest_rating = case_when(
+        min_sim == sim_1 ~ profile_rating_1,
+        min_sim == sim_2 ~ profile_rating_2,
+        min_sim == sim_3 ~ profile_rating_3,
+        min_sim == sim_4 ~ profile_rating_4,
+        min_sim == sim_5 ~ profile_rating_5,
+        min_sim == sim_6 ~ profile_rating_6,
+      ),
+      rweight = unweighted_closest_rating * max_sim + (unweighted_furthest_rating * -1*min_sim)
+    )
+    
+  
+  return(lm(predicted ~ rweight, d))
+}
+
+models_allo_minmax <- lapply(IDs, fit_model_allo_minmax)
+
+hist(map_dbl(models_allo_minmax, get_R2))
+```
+
 
 max_sim == sim_1 ~ sim_1*profile_rating_1,Could do a take the top-2 version, etc.
 
 And then could allow for negative similarities with inverse ratings (i.e. if you like something X a lot, I infer you will dislike thing very different from X). -- this seems less likely to me, but it gets raised as a heuristic in some of these other prior works
 
+## weighting in own views
+
 ```{r}
-# pred ~ profile_rating * similarity 
-df_with_fits <- df_centered %>% 
-  ungroup() %>% 
-  filter(participantID %in% IDs) %>% 
+fit_model_allo_ego <- function(pid, distfunc = euc_sim_list){
+  d <- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, distfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, distfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, distfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, distfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, distfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, distfunc)
+    ) %>% 
+    # mutate(across(contains("sim_"), ~1/.x)) %>% 
+    mutate(
+      rweighted = (profile_rating_1 * sim_1 + profile_rating_2 * sim_2 + profile_rating_3 * sim_3 + profile_rating_4 * sim_4 + profile_rating_5 * sim_5 + profile_rating_6 * sim_6)/(sim_1 + sim_2 + sim_3 + sim_4 + sim_5 + sim_6) + (recommender_rating * cos_sim)
+    ) 
   
-  distinct(participantID, profile, cos_sim, euc_dist) %>% 
+  return(lm(predicted ~ rweighted, d))
+}
+
+models_allo_ego <- lapply(IDs, fit_model_allo_ego)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+get_beta <- function(mod){
+  x <- mod$coefficients[2]
+  return(x)
+}
+
+hist(map_dbl(models_allo_ego, get_R2))
+```
+
+
+# Comparing models
+
+```{r}
+
+df_with_fits <- df_centered %>% 
+  group_by(participantID, profile, cos_sim, euc_dist) %>% 
+  summarize(
+    mae = mean(abs(predicted - profile_rating)),
+    corr =cor(predicted, profile_rating)
+    ) %>% 
+  ungroup() %>% 
+  arrange(participantID) %>% 
   mutate(
     ego_r2 = map_dbl(models_ego, get_R2),
     allo_r2 = map_dbl(models_allo, get_R2),
-    allobest_r2 = map_dbl(models_allobest_unweighted, get_R2)
+    allo_neg_r2 = map_dbl(models_allo_neg, get_R2_nls),
+    allobest_r2 = map_dbl(models_allobest_unweighted, get_R2),
+    allo_minmax_r2 = map_dbl(models_allo_minmax, get_R2),
+    hybrid_r2 = map_dbl(models_allo_ego, get_R2)
   ) %>% 
   mutate(
-    max_r2 = pmap_dbl(list(ego_r2,allo_r2, allobest_r2), max),
+    max_r2 = pmap_dbl(list(ego_r2,allo_r2, allobest_r2, allo_neg_r2, hybrid_r2, allo_minmax_r2), max),
     best_model = case_when(
       max_r2 == ego_r2 ~ "ego",
       max_r2 == allo_r2 ~ "allo",
-      max_r2 == allobest_r2 ~ "allobest"
+      max_r2 == allo_neg_r2 ~ "allo_neg",
+      max_r2 == allobest_r2 ~ "allobest",
+      max_r2 == allo_minmax_r2 ~ "allominmax",
+      max_r2 == hybrid_r2 ~ "hybrid"
+      
     )
   )
 
 df_with_fits %>% 
-  filter(participantID >= 0) %>%
   count(best_model)
 ```
 
@@ -377,22 +580,110 @@ df_with_fits %>%
   geom_histogram()
 ```
 
-Huh, don't think this is gonna be significant ...
-
 ```{r}
 
 df_with_fits %>% 
   ungroup() %>% 
   mutate(mod_beta = map_dbl(models_ego, get_beta)) %>% 
-  filter(participantID > 0) %>% 
-  filter(best_model == "ego") %>% 
+  filter(best_model == "ego") %>%
   ggplot(aes(x=cos_sim, y = mod_beta)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+
+df_with_fits %>% 
+  ungroup() %>% 
+  mutate(mod_beta = map_dbl(models_ego, get_beta)) %>% 
+  filter(best_model == "ego") %>%
+  ggplot(aes(x=euc_dist, y = mod_beta)) +
   geom_point() +
   geom_smooth(method = "lm")
 ```
 
+That is significant positive relationship with cosine similarity. (funny, looked like it wouldn't be in the plot). So there's some evidence the egocentric folks do take their own similarity to the target into account in their estimates. 
 
-## chatgpt?
+```{r}
+df_with_fits %>% 
+  ungroup() %>% 
+  mutate(mod_beta = map_dbl(models_ego, get_beta)) %>% 
+  filter(best_model == "ego") -> x
+
+summary(lm(mod_beta ~ cos_sim, x))
+summary(lm(mod_beta ~ euc_dist, x))
+```
+
+
+
+## Comparing predictions
+
+No strategy is a clear winner.
+
+```{r}
+df_with_fits %>% 
+  ggplot(aes(x=best_model, y = mae)) +
+  geom_boxplot(alpha = .25) +
+  geom_jitter(width = .1) 
+```
+
+
+```{r}
+df_with_fits %>% 
+  # filter(cos_sim > .50) %>% 
+  # mutate(allo_or_ego = if_else(best_model == 'ego', "ego", "allo")) %>%
+  ggplot(aes(x=cos_sim, y = mae)) +
+  geom_point()+
+  # facet_wrap(~allo_or_ego) +
+  geom_smooth(method='lm')
+```
+
+being simlar to the target seems to worsen predictions, if anything. Though the relationship is weak. 
+
+## How well do participants and our best-fitting models predict? Should we look for other models?
+
+Looking through some examples manually, for the most accurate predictors, predictions are well-explained by ego-based models where those are the best-fitting models. But they are fairly poorly explained by allocentrtic models where those are the best-fitting. So a task could be to figure out what those people are doing -- possibly soome weighted combination of ego-centric and allocentric? Maybe something else?
+
+
+```{r}
+df_with_fits %>% 
+  # filter(participantID > 0) %>% 
+  # group_by(participantID) %>% 
+  # mutate(corr = cor(predicted, profile_rating)) %>% 
+  ungroup() %>% 
+  distinct(participantID, best_model, corr, max_r2) %>% 
+  mutate(prank = percent_rank(corr)) %>% 
+  # filter(prank > .90) %>% 
+  arrange(-prank)
+```
+
+Some more work to do here. If a person is predicting poorly and all our models predict their behavior poorly, well then maybe they are just noisy/sloppy. But if they are doing a good job, then we want a model that does a good job describing their behavior.
+
+```{r}
+df_with_fits %>% 
+  filter(max_r2 < .3) %>%
+  ggplot(aes(x=corr)) +
+  geom_histogram() 
+```
+
+
+
+----
+
+next steps:
+- be more systematic: euclidean and cosine versions of each model [Matt]
+- baseline models: [matt]
+  - popularity: guessing average rating from S1
+  - target average: guessing target's average rating for all
+  - respondent average: guess your own average each time
+- Random chance: [matt]
+  - What is prob of correlation > .75 if just randomly guessing at 18 points? compare distributions of our poorl-fit participants with this random chance distribution
+- Negative similarity: fitting a parameter to determine midpoint (zeropoint) [Derek] [done]
+- move to AIC (Akaike) weights rather than R2 selection + create visualization [Derek]
+
+----
+
+# chatgpt stuff
+
+I broke this with some recent code changes above. This wasn't looking particularly promising wrt identifying different strategies IMO.
 
 ```{r}
 df_with_fits %>% 
@@ -410,18 +701,4 @@ df %>%
 
 Generally, I guess it does OK
 
-## all people
-
-```{r}
-df %>% 
-  filter(participantID > 0) %>% 
-  group_by(participantID) %>% 
-  mutate(corr = cor(predicted, profile_rating)) %>% 
-  ungroup() %>% 
-  mutate(corank = dense_rank(corr)) %>% 
-  ggplot(aes(x=predicted, y = profile_rating)) +
-  geom_point() +
-  facet_wrap(~-corank) +
-  theme(aspect.ratio = 1)
-```
 
