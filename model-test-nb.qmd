@@ -652,7 +652,7 @@ df_with_fits %>%
   distinct(participantID, best_model, corr, max_r2) %>% 
   mutate(prank = percent_rank(corr)) %>% 
   # filter(prank > .90) %>% 
-  arrange(-prank)
+  arrange(-max_r2)
 ```
 
 Some more work to do here. If a person is predicting poorly and all our models predict their behavior poorly, well then maybe they are just noisy/sloppy. But if they are doing a good job, then we want a model that does a good job describing their behavior.

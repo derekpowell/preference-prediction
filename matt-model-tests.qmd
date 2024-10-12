@@ -475,7 +475,7 @@ get_beta <- function(mod){
 
 hist(map_dbl(models_allo, get_R2))
 ```
-
+cos distance is significantly worse here.
 
 
 ### negative similarities
@@ -589,6 +589,57 @@ get_beta <- function(mod){
 
 hist(map_dbl(models_allobestweighted, get_R2))
 ```
+```{r with cos distance}
+
+fit_model_cos_allobest_weighted <- function(pid, simfunc = cos_sim_list){
+  d <- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    ) %>% 
+    mutate(
+      max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
+      weighted_closest_rating = case_when(
+        max_sim == sim_1 ~ max_sim*profile_rating_1,
+        max_sim == sim_2 ~ max_sim*profile_rating_2,
+        max_sim == sim_3 ~ max_sim*profile_rating_3,
+        max_sim == sim_4 ~ max_sim*profile_rating_4,
+        max_sim == sim_5 ~ max_sim*profile_rating_5,
+        max_sim == sim_6 ~ max_sim*profile_rating_6,
+      ),
+      unweighted_closest_rating = case_when(
+        max_sim == sim_1 ~ profile_rating_1,
+        max_sim == sim_2 ~ profile_rating_2,
+        max_sim == sim_3 ~ profile_rating_3,
+        max_sim == sim_4 ~ profile_rating_4,
+        max_sim == sim_5 ~ profile_rating_5,
+        max_sim == sim_6 ~ profile_rating_6,
+      )
+    )
+  
+  return(lm(predicted ~ weighted_closest_rating, d))
+}
+
+models_cos_allobestweighted <- lapply(IDs, fit_model_cos_allobest_weighted)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+get_beta <- function(mod){
+  x <- mod$coefficients[2]
+  return(x)
+}
+
+hist(map_dbl(models_cos_allobestweighted, get_R2))
+```
 
 And another version where we ignore the similarity weight, just use the predicted value for most similar item.
 
@@ -638,6 +689,52 @@ get_R2 <- function(mod){
 hist(map_dbl(models_allobest_unweighted, get_R2))
 ```
 
+```{r}
+fit_model_cos_allobest_unweighted <- function(pid, simfunc = cos_sim_list){
+  d <- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    ) %>% 
+    mutate(
+      max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
+      weighted_closest_rating = case_when(
+        max_sim == sim_1 ~ max_sim*profile_rating_1,
+        max_sim == sim_2 ~ max_sim*profile_rating_2,
+        max_sim == sim_3 ~ max_sim*profile_rating_3,
+        max_sim == sim_4 ~ max_sim*profile_rating_4,
+        max_sim == sim_5 ~ max_sim*profile_rating_5,
+        max_sim == sim_6 ~ max_sim*profile_rating_6,
+      ),
+      unweighted_closest_rating = case_when(
+        max_sim == sim_1 ~ profile_rating_1,
+        max_sim == sim_2 ~ profile_rating_2,
+        max_sim == sim_3 ~ profile_rating_3,
+        max_sim == sim_4 ~ profile_rating_4,
+        max_sim == sim_5 ~ profile_rating_5,
+        max_sim == sim_6 ~ profile_rating_6,
+      )
+    )
+  
+  return(lm(predicted ~ unweighted_closest_rating, d))
+}
+
+models_cos_allobest_unweighted <- lapply(IDs, fit_model_cos_allobest_unweighted)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+hist(map_dbl(models_cos_allobest_unweighted, get_R2))
+```
+euc and cos seem pretty similar for allobest_unweighted.
 
 
 ```{r}
@@ -795,7 +892,7 @@ fit_popego_allo <- function(pid, simfunc = euc_sim_list){
       sim_6 = map2_dbl(embedding, embedding_6, simfunc)
     ) %>% 
     mutate(
-      rweighted = (profile_rating_1 * sim_1 + profile_rating_2 * sim_2 + profile_rating_3 * sim_3 + profile_rating_4 * sim_4 + profile_rating_5 * sim_5 + profile_rating_6 * sim_6)/(sim_1 + sim_2 + sim_3 + sim_4 + sim_5 + sim_6) + Average_Rating + recommender_rating
+      rweighted =  Average_Rating + recommender_rating + (profile_rating_1 * sim_1 + profile_rating_2 * sim_2 + profile_rating_3 * sim_3 + profile_rating_4 * sim_4 + profile_rating_5 * sim_5 + profile_rating_6 * sim_6)/(sim_1 + sim_2 + sim_3 + sim_4 + sim_5 + sim_6) 
     ) 
   
   return(lm(predicted ~ rweighted, d))
@@ -918,6 +1015,41 @@ get_R2_nls <- function(mod){
 hist(map_dbl(models_popego_allo_neg, get_R2_nls))
 ```
 
+```{r popular ego allo neg model}
+fit_cos_popego_allo_neg <- function(pid, simfunc = cos_sim_list){
+  d <<- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    )# %>% 
+    # mutate(across(contains('sim_'), clamp)) %>%
+    # mutate(
+    #   rweighted = (profile_rating_1 * sim_1 + profile_rating_2 * sim_2 + profile_rating_3 * sim_3 + profile_rating_4 * sim_4 + profile_rating_5 * sim_5 + profile_rating_6 * sim_6)/(sim_1 + sim_2 + sim_3 + sim_4 + sim_5 + sim_6)
+  
+  fit <- nlsLM(predicted ~ recommender_rating + Average_Rating + b + z * (profile_rating_1 * (sim_1 - a) + profile_rating_2 * (sim_2 - a) + profile_rating_3 * (sim_3 - a) + profile_rating_4 * (sim_4 - a) + profile_rating_5 * (sim_5 - a) + profile_rating_6 * (sim_6 - a) )/(sim_1 + sim_2 + sim_3 + sim_4 + sim_5 + sim_6), d, start=list(a=1, b=0, z = 1), algorithm="port", 
+    lower=c(0, -100, -100), upper=c(2,100, 100) )
+     
+  return(fit)
+}
+
+models_cos_popego_allo_neg <- lapply(IDs, fit_cos_popego_allo_neg)
+
+get_R2_nls <- function(mod){
+  preds <- predict(mod)
+  y <- preds + resid(mod)
+  return(cor(preds, y)^2)
+}
+
+hist(map_dbl(models_cos_popego_allo_neg, get_R2_nls))
+```
+
+
 
 ```{r}
 fit_pop_allobest_weighted <- function(pid, simfunc = euc_sim_list){
@@ -969,6 +1101,60 @@ get_beta <- function(mod){
 
 hist(map_dbl(models_pop_allobestweighted, get_R2))
 ```
+
+```{r}
+fit_cos_pop_allobest_weighted <- function(pid, simfunc = cos_sim_list){
+  d <- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    ) %>% 
+    mutate(
+      max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
+      weighted_closest_rating = case_when(
+        max_sim == sim_1 ~ max_sim*profile_rating_1,
+        max_sim == sim_2 ~ max_sim*profile_rating_2,
+        max_sim == sim_3 ~ max_sim*profile_rating_3,
+        max_sim == sim_4 ~ max_sim*profile_rating_4,
+        max_sim == sim_5 ~ max_sim*profile_rating_5,
+        max_sim == sim_6 ~ max_sim*profile_rating_6,
+      ),
+      unweighted_closest_rating = case_when(
+        max_sim == sim_1 ~ profile_rating_1,
+        max_sim == sim_2 ~ profile_rating_2,
+        max_sim == sim_3 ~ profile_rating_3,
+        max_sim == sim_4 ~ profile_rating_4,
+        max_sim == sim_5 ~ profile_rating_5,
+        max_sim == sim_6 ~ profile_rating_6,
+      )
+    )
+  
+  return(lm(predicted ~ weighted_closest_rating + Average_Rating, d))
+}
+
+models_cos_pop_allobestweighted <- lapply(IDs, fit_cos_pop_allobest_weighted)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+get_beta <- function(mod){
+  x <- mod$coefficients[2]
+  return(x)
+}
+
+hist(map_dbl(models_cos_pop_allobestweighted, get_R2))
+```
+
+
+
 ```{r}
 fit_pop_allobest_unweighted <- function(pid, simfunc = euc_sim_list){
   d <- df_centered %>% 
@@ -1013,6 +1199,53 @@ get_R2 <- function(mod){
 }
 
 hist(map_dbl(models_pop_allobest_unweighted, get_R2))
+```
+
+
+```{r}
+fit_cos_pop_allobest_unweighted <- function(pid, simfunc = cos_sim_list){
+  d <- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    ) %>% 
+    mutate(
+      max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
+      weighted_closest_rating = case_when(
+        max_sim == sim_1 ~ max_sim*profile_rating_1,
+        max_sim == sim_2 ~ max_sim*profile_rating_2,
+        max_sim == sim_3 ~ max_sim*profile_rating_3,
+        max_sim == sim_4 ~ max_sim*profile_rating_4,
+        max_sim == sim_5 ~ max_sim*profile_rating_5,
+        max_sim == sim_6 ~ max_sim*profile_rating_6,
+      ),
+      unweighted_closest_rating = case_when(
+        max_sim == sim_1 ~ profile_rating_1,
+        max_sim == sim_2 ~ profile_rating_2,
+        max_sim == sim_3 ~ profile_rating_3,
+        max_sim == sim_4 ~ profile_rating_4,
+        max_sim == sim_5 ~ profile_rating_5,
+        max_sim == sim_6 ~ profile_rating_6,
+      )
+    )
+  
+  return(lm(predicted ~ unweighted_closest_rating + Average_Rating, d))
+}
+
+models_cos_pop_allobest_unweighted <- lapply(IDs, fit_cos_pop_allobest_unweighted)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+hist(map_dbl(models_cos_pop_allobest_unweighted, get_R2))
 ```
 
 
@@ -1067,6 +1300,61 @@ get_beta <- function(mod){
 hist(map_dbl(models_popego_allobestweighted, get_R2))
 ```
 
+
+
+```{r}
+fit_cos_popego_allobest_weighted <- function(pid, simfunc = cos_sim_list){
+  d <- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    ) %>% 
+    mutate(
+      max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
+      weighted_closest_rating = case_when(
+        max_sim == sim_1 ~ max_sim*profile_rating_1,
+        max_sim == sim_2 ~ max_sim*profile_rating_2,
+        max_sim == sim_3 ~ max_sim*profile_rating_3,
+        max_sim == sim_4 ~ max_sim*profile_rating_4,
+        max_sim == sim_5 ~ max_sim*profile_rating_5,
+        max_sim == sim_6 ~ max_sim*profile_rating_6,
+      ),
+      unweighted_closest_rating = case_when(
+        max_sim == sim_1 ~ profile_rating_1,
+        max_sim == sim_2 ~ profile_rating_2,
+        max_sim == sim_3 ~ profile_rating_3,
+        max_sim == sim_4 ~ profile_rating_4,
+        max_sim == sim_5 ~ profile_rating_5,
+        max_sim == sim_6 ~ profile_rating_6,
+      )
+    )
+  
+  return(lm(predicted ~ recommender_rating + weighted_closest_rating + Average_Rating, d))
+}
+
+models_cos_popego_allobestweighted <- lapply(IDs, fit_cos_popego_allobest_weighted)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+get_beta <- function(mod){
+  x <- mod$coefficients[2]
+  return(x)
+}
+
+hist(map_dbl(models_cos_popego_allobestweighted, get_R2))
+```
+
+
+
 ```{r}
 fit_popego_allobest_unweighted <- function(pid, simfunc = euc_sim_list){
   d <- df_centered %>% 
@@ -1104,6 +1392,53 @@ fit_popego_allobest_unweighted <- function(pid, simfunc = euc_sim_list){
 }
 
 models_popego_allobest_unweighted <- lapply(IDs, fit_popego_allobest_unweighted)
+
+get_R2 <- function(mod){
+  x <- summary(mod)$r.squared
+  return(x)
+}
+
+hist(map_dbl(models_popego_allobest_unweighted, get_R2))
+```
+
+
+```{r}
+fit_cos_popego_allobest_unweighted <- function(pid, simfunc = cos_sim_list){
+  d <- df_centered %>% 
+    filter(participantID == pid) %>% 
+    left_join(prof_ratings, by = "profile") %>% 
+    mutate(
+      sim_1 = map2_dbl(embedding, embedding_1, simfunc),
+      sim_2 = map2_dbl(embedding, embedding_2, simfunc),
+      sim_3 = map2_dbl(embedding, embedding_3, simfunc),
+      sim_4 = map2_dbl(embedding, embedding_4, simfunc),
+      sim_5 = map2_dbl(embedding, embedding_5, simfunc),
+      sim_6 = map2_dbl(embedding, embedding_6, simfunc)
+    ) %>% 
+    mutate(
+      max_sim = pmap_dbl(list(sim_1, sim_2, sim_3, sim_4, sim_5, sim_6), max),
+      weighted_closest_rating = case_when(
+        max_sim == sim_1 ~ max_sim*profile_rating_1,
+        max_sim == sim_2 ~ max_sim*profile_rating_2,
+        max_sim == sim_3 ~ max_sim*profile_rating_3,
+        max_sim == sim_4 ~ max_sim*profile_rating_4,
+        max_sim == sim_5 ~ max_sim*profile_rating_5,
+        max_sim == sim_6 ~ max_sim*profile_rating_6,
+      ),
+      unweighted_closest_rating = case_when(
+        max_sim == sim_1 ~ profile_rating_1,
+        max_sim == sim_2 ~ profile_rating_2,
+        max_sim == sim_3 ~ profile_rating_3,
+        max_sim == sim_4 ~ profile_rating_4,
+        max_sim == sim_5 ~ profile_rating_5,
+        max_sim == sim_6 ~ profile_rating_6,
+      )
+    )
+  
+  return(lm(predicted ~ recommender_rating + unweighted_closest_rating + Average_Rating, d))
+}
+
+models_cos_popego_allobest_unweighted <- lapply(IDs, fit_cos_popego_allobest_unweighted)
 
 get_R2 <- function(mod){
   x <- summary(mod)$r.squared
@@ -1386,10 +1721,14 @@ Some more work to do here. If a person is predicting poorly and all our models p
 
 Additional notes: 
 Popular better predicts the worse the rater did if it was the best performing model.
+
 Judging from the random guess distribution, anything above ~.4 or ~.5 corr is pretty impressive. 
 What's an r2 value where we can say that a person is likely using this model or something similar? r2>=.5? r would be ~.7, decently strong correlation. If so then we can say we can model for ~50% of participants, keep finding models to meet that criteria? 
+
 Popular ego hybrid model: Seems very successful, but there are still high correlation low R2 cases unaccounted for, also it has really high R2 for cases with both poor and good correlations, break apart by profile to see if this strategy is only successful with the more mainstream profiles and sucks at more eccentric profiles. 
-I am thinking that a bunch of different models that weigh popular opinion, egocentric, and each of the allocentric predictors individually may capture the rest
+
+Models with more predictors do better but not by a lot in each case. For minor improvements, do we go with the simpler model?
+
 
 
 
