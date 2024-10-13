@@ -1635,6 +1635,56 @@ df_with_fits %>%
   count(best_model)
 ```
 popego_allo_best seems to have by far absorbed lots of the cases when added. Without it its a lot more disparate. 
+# Top three models per participant
+```{r}
+
+df_with_fits1 <- df_centered %>% 
+  group_by(participantID, profile, cos_sim, euc_dist) %>% 
+  summarize(
+    mae = mean(abs(predicted - profile_rating)),
+    corr = cor(predicted, profile_rating)
+  ) %>% 
+  ungroup() %>% 
+  arrange(participantID) %>% 
+  mutate(
+    ego_r2 = map_dbl(models_ego, get_R2),
+    allo_r2 = map_dbl(models_allo, get_R2),
+    allo_neg_r2 = map_dbl(models_allo_neg, get_R2_nls),
+    allobest_r2 = map_dbl(models_allobest_unweighted, get_R2),
+    allo_minmax_r2 = map_dbl(models_allo_minmax, get_R2),
+    hybrid_r2 = map_dbl(models_allo_ego, get_R2),
+    popular_r2 = map_dbl(models_popular, get_R2),
+    popego_r2 = map_dbl(models_popego, get_R2),
+    popego_allo_r2 = map_dbl(models_popego_allo, get_R2),
+    pop_allo_r2 = map_dbl(models_pop_allo, get_R2), 
+    pop_allo_neg_r2 = map_dbl(models_pop_allo_neg, get_R2_nls),
+    pop_allo_best_r2 = map_dbl(models_pop_allobestweighted, get_R2),
+    pop_allo_bestunw_r2 = map_dbl(models_pop_allobest_unweighted, get_R2),
+    pop_allo_minmax_r2 = map_dbl(models_popallo_minmax, get_R2),
+    popego_allo_neg_r2 = map_dbl(models_popego_allo_neg, get_R2_nls),
+    popego_allo_best_r2 = map_dbl(models_popego_allobestweighted, get_R2),
+    popego_allo_bestunw_r2 = map_dbl(models_popego_allobest_unweighted, get_R2)
+  ) 
+
+df_long1 <- df_with_fits1 %>%
+  pivot_longer(
+    cols = starts_with("ego_r2"):starts_with("popego_allo_bestunw_r2"),
+    names_to = "model",
+    values_to = "r2_value"
+  )
+
+
+ df_long1 %>%
+  group_by(participantID) %>%
+  select(participantID, profile, model, r2_value, corr)%>%
+  arrange(desc(r2_value)) %>%
+  slice_head(n = 3) %>%
+  ungroup()
+
+
+
+```
+
 
 ```{r}
 df_with_fits %>% 
