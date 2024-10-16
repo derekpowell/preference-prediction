@@ -1846,10 +1846,35 @@ ggplot(df_with_fits, aes(x = as.factor(participantID), y = corr)) +
 ggplot(df_with_fits, aes(x = corr)) +
   geom_histogram(binwidth = 0.1, fill = "green", color = "black") +  
   labs(x = "Correlation (Corr)", y = "Count") +
-  ggtitle("Histogram of Correlations Faceted by Profile")
+  ggtitle("Histogram of Correlations")
 ```
 Easier story to tell but may have too wide of binwidth
 
+```{r}
+df_scatter <- df_with_fits %>%
+  arrange(corr) %>%  
+  mutate(rank = percent_rank(corr),  
+         group = case_when(
+           rank >= 0.9 ~ "Best 10%",  
+           rank >= 0.45 & rank <= 0.55 ~ "Average", 
+           rank <= 0.1 ~ "Worst 10%", 
+           TRUE ~ NA_character_ 
+         )) %>%
+  filter(!is.na(group))
+```
+
+
+```{r}
+ggplot(df_scatter, aes(x = participantID, y = corr)) +
+  geom_point() +
+  labs(x = "Participant ID", y = "Correlation (Corr)", title = "Accuracies for the Best 10%, Average, and Worst 10% Participants") +
+  facet_wrap(~ group) +  
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),  
+    axis.text.x = element_text(angle = 45, hjust = 1)  
+  )
+```
 
 ## MAE of RS vs people
 
@@ -1957,8 +1982,8 @@ chunk3_data <- df_centered %>%
   filter(participantID != 0) %>%
   group_by(participantID) %>%
   summarize(val = mean(abs(predicted - profile_rating))) %>%
-  filter(val <= quantile(val, 0.25)) %>%
-  mutate(alg = "Top 25% of Participants")
+  filter(val <= quantile(val, 0.20)) %>%
+  mutate(alg = "Top 20% of Participants")
 
 
 combined_data <- bind_rows(chunk1_data, chunk2_data, chunk3_data)
