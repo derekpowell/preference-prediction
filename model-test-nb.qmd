@@ -619,7 +619,6 @@ summary(lm(mod_beta ~ euc_dist, x))
 ## AIC
 
 ```{r}
-
 # aic
 r2aic <- function(R2, TSS, n, k){
   RSS <- (1-R2)*TSS
@@ -707,7 +706,7 @@ df_with_fits %>%
   distinct(participantID, best_model, corr, max_r2) %>% 
   mutate(prank = percent_rank(corr)) %>% 
   # filter(prank > .90) %>% 
-  arrange(-max_r2)
+  arrange(-corr)
 ```
 
 Some more work to do here. If a person is predicting poorly and all our models predict their behavior poorly, well then maybe they are just noisy/sloppy. But if they are doing a good job, then we want a model that does a good job describing their behavior.
@@ -767,5 +766,7 @@ df %>%
 ```
 
 Generally, I guess it does OK
+
+
 
 
