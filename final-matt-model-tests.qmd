@@ -1565,13 +1565,13 @@ for (i in 1:n_simulations) {
 }
 
 
-probability <- mean(correlations > 0.75)
-print(paste("Probability of correlation > 0.75: ", probability))
+probability <- mean(correlations > 0.5)
+print(paste("Probability of correlation > 0.5: ", probability))
 
 
-hist(correlations, breaks = 50, main = "Distribution of Correlations Under Random Guessing",
+hist(correlations, breaks = 50, main = "Simulated Distribution of Correlations Under Random Guessing",
      xlab = "Correlation", col = "lightblue", border = "black")
-abline(v = 0.3, col = "red", lwd = 2, lty = 2)
+abline(v = 0.5, col = "red", lwd = 2, lty = 2)
 
 ```
 
@@ -1846,9 +1846,20 @@ ggplot(df_with_fits, aes(x = as.factor(participantID), y = corr)) +
 
 ```{r}
 ggplot(df_with_fits, aes(x = corr)) +
-  geom_histogram(binwidth = 0.1, fill = "green", color = "black") +  
+  geom_histogram(binwidth = 0.1, fill = "lightblue", color = "black") +  
   labs(x = "Correlation (Corr)", y = "Count") +
-  ggtitle("Histogram of Correlations")
+  ggtitle("Distribution of Participant's Correlations")+
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank()   
+  )+
+  geom_vline(xintercept = 0.5, color = "red", linetype = "dashed", size = 1.5)
+
+
+probability1 <- mean(df_with_fits$corr > 0.5)
+print(paste("Probability of correlation > 0.5: ", probability))
 ```
 Easier story to tell but may have too wide of binwidth
 
@@ -1857,9 +1868,9 @@ df_scatter <- df_with_fits %>%
   arrange(corr) %>%  
   mutate(rank = percent_rank(corr),  
          group = case_when(
-           rank >= 0.9 ~ "Best 10%",  
-           rank >= 0.45 & rank <= 0.55 ~ "Average", 
-           rank <= 0.1 ~ "Worst 10%", 
+           rank >= 0.9 ~ "Best 10% of Participants",  
+           rank >= 0.45 & rank <= 0.55 ~ "Near Average Participants", 
+           rank <= 0.1 ~ "Worst 10% of Participants", 
            TRUE ~ NA_character_ 
          )) %>%
   filter(!is.na(group))
@@ -1869,9 +1880,15 @@ df_scatter <- df_with_fits %>%
 ```{r}
 ggplot(df_scatter, aes(x = participantID, y = corr)) +
   geom_point() +
-  labs(x = "Participant ID", y = "Correlation (Corr)", title = "Accuracies for the Best 10%, Average, and Worst 10% Participants") +
+  geom_smooth(method = "lm", se = FALSE, color = "maroon") +
+  labs(x = "Participant ID", y = "Correlation (Corr)", title = "Accuracies for the Best, Average, and Worst Participants") +
   facet_wrap(~ group) +  
   theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+   # panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank()   
+  )+
   theme(
     strip.text = element_text(size = 10),  
     axis.text.x = element_text(angle = 45, hjust = 1)  
@@ -1985,7 +2002,7 @@ chunk3_data <- df_centered %>%
   group_by(participantID) %>%
   summarize(val = mean(abs(predicted - profile_rating))) %>%
   filter(val <= quantile(val, 0.20)) %>%
-  mutate(alg = "Top 20% of Participants")
+  mutate(alg = "Best 20% of Participants")
 
 
 combined_data <- bind_rows(chunk1_data, chunk2_data, chunk3_data)
@@ -1994,7 +2011,12 @@ combined_data <- bind_rows(chunk1_data, chunk2_data, chunk3_data)
 ggplot(combined_data, aes(x = alg, y = val)) +
   geom_boxplot() +
   coord_flip() +
-  labs(y = "MAE", x = "Recommender", title = "Recommender Systems and Human Participants")
+  labs(y = "MAE", x = "Recommender", title = "Recommender Systems Versus Human Participants")+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+   # panel.grid.major = element_blank(), 
+    #panel.grid.minor = element_blank()   
+  )
 
 # x <- lapply(results, getResults)
 # map2(names(results), results, ~as_tibble(getResults(.y)) %>% mutate(namez = .x))
@@ -2046,11 +2068,150 @@ ggplot(combined_data, aes(x = source, y = val)) +
 
 ```
 ### AIC 
+
+
 ```{r}
 
+r2aic <- function(R2, TSS, n, k){
+  RSS <- (1-R2)*TSS
+  aic <- n * log(RSS/n) + 2 * k
+  return(aic)
+}
+
+
+
+r2aic_c <- function(R2, TSS, n, k){
+  RSS <- (1-R2) * TSS
+  aic <- n * log(RSS/n) + 2 * k
+  return(aic + (2 * k^2 + 2 * k) / (n - k - 1))
+}
+
+
+df_aic_fit <- df_centered %>% 
+  group_by(participantID, profile, cos_sim, euc_dist) %>% 
+  summarize(
+    mae = mean(abs(predicted - profile_rating)),
+    corr = cor(predicted, profile_rating),
+    TSS = var(predicted) * n()  
+  ) %>% 
+  ungroup() %>% 
+  arrange(participantID) %>% 
+  mutate(
+    ego_r2 = map_dbl(models_ego, get_R2),
+    allo_r2 = map_dbl(models_allo, get_R2),
+    allo_neg_r2 = map_dbl(models_allo_neg, get_R2_nls),
+    allobest_r2 = map_dbl(models_allobest_unweighted, get_R2),
+    allo_minmax_r2 = map_dbl(models_allo_minmax, get_R2),
+    hybrid_r2 = map_dbl(models_allo_ego, get_R2),
+    popular_r2 = map_dbl(models_popular, get_R2),
+    popego_r2 = map_dbl(models_popego, get_R2),
+    popego_allo_r2 = map_dbl(models_popego_allo, get_R2),
+    pop_allo_r2 = map_dbl(models_pop_allo, get_R2), 
+    pop_allo_neg_r2 = map_dbl(models_pop_allo_neg, get_R2_nls),
+    pop_allo_best_r2 = map_dbl(models_pop_allobestweighted, get_R2),
+    pop_allo_bestunw_r2 = map_dbl(models_pop_allobest_unweighted, get_R2),
+    pop_allo_minmax_r2 = map_dbl(models_popallo_minmax, get_R2),
+    popego_allo_neg_r2 = map_dbl(models_popego_allo_neg, get_R2_nls),
+    popego_allo_best_r2 = map_dbl(models_popego_allobestweighted, get_R2),
+    popego_allo_bestunw_r2 = map_dbl(models_popego_allobest_unweighted, get_R2),
+    
+   
+    n = n(),
+
+    
+    ego_aic = pmap_dbl(list(ego_r2, TSS, n, 2), r2aic_c),  
+    allo_aic = pmap_dbl(list(allo_r2, TSS, n, 2), r2aic_c),  
+    allo_neg_aic = pmap_dbl(list(allo_neg_r2, TSS, n, 2), r2aic_c),  
+    allobest_aic = pmap_dbl(list(allobest_r2, TSS, n, 2), r2aic_c),  
+    allo_minmax_aic = pmap_dbl(list(allo_minmax_r2, TSS, n, 2), r2aic_c), 
+    hybrid_aic = pmap_dbl(list(hybrid_r2, TSS, n, 3), r2aic_c),  
+    popular_aic = pmap_dbl(list(popular_r2, TSS, n, 2), r2aic_c),  
+    popego_aic = pmap_dbl(list(popego_r2, TSS, n, 3), r2aic_c),  
+    popego_allo_aic = pmap_dbl(list(popego_allo_r2, TSS, n, 4), r2aic_c),  
+    pop_allo_aic = pmap_dbl(list(pop_allo_r2, TSS, n, 3), r2aic_c),  
+    pop_allo_neg_aic = pmap_dbl(list(pop_allo_neg_r2, TSS, n, 3), r2aic_c),  
+    pop_allo_best_aic = pmap_dbl(list(pop_allo_best_r2, TSS, n, 3), r2aic_c),  
+    pop_allo_bestunw_aic = pmap_dbl(list(pop_allo_bestunw_r2, TSS, n, 3), r2aic_c),  
+    pop_allo_minmax_aic = pmap_dbl(list(pop_allo_minmax_r2, TSS, n, 3), r2aic_c),  
+    popego_allo_neg_aic = pmap_dbl(list(popego_allo_neg_r2, TSS, n, 4), r2aic_c),  
+    popego_allo_best_aic = pmap_dbl(list(popego_allo_best_r2, TSS, n, 4), r2aic_c),  
+    popego_allo_bestunw_aic = pmap_dbl(list(popego_allo_bestunw_r2, TSS, n, 4), r2aic_c)  
+  ) %>% 
+  
+  mutate(
+    min_aic = pmap_dbl(list(ego_aic, allo_aic, allobest_aic, allo_neg_aic, hybrid_aic, allo_minmax_aic, popular_aic, popego_aic, popego_allo_aic, pop_allo_aic, pop_allo_neg_aic, pop_allo_best_aic, pop_allo_minmax_aic, popego_allo_neg_aic, popego_allo_best_aic, popego_allo_bestunw_aic), min),
+    best_model = case_when(
+      min_aic == ego_aic ~ "ego",
+      min_aic == allo_aic ~ "allo",
+      min_aic == allo_neg_aic ~ "allo_neg",
+      min_aic == allobest_aic ~ "allobest",
+      min_aic == allo_minmax_aic ~ "allominmax",
+      min_aic == hybrid_aic ~ "hybrid",
+      min_aic == popular_aic ~ "popular",
+      min_aic == popego_aic ~ "popego",
+      min_aic == popego_allo_aic ~ "popego_allo",
+      min_aic == pop_allo_aic ~ "pop_allo",
+      min_aic == pop_allo_neg_aic ~ "pop_allo_neg",
+      min_aic == pop_allo_best_aic ~ "pop_allo_best",
+      min_aic == pop_allo_bestunw_aic ~ "pop_allo_bestunw",
+      min_aic == pop_allo_minmax_aic ~ "pop_allo_minmax",
+      min_aic == popego_allo_neg_aic ~ "popego_allo_neg",
+      min_aic == popego_allo_best_aic ~ "popego_allo_best",
+      min_aic == popego_allo_bestunw_aic ~ "popego_allo_bestunw"
+    )
+  )
+
+df_aic_fit %>% 
+  count(best_model)
+
+```
+```{r}
+df_aic_fit %>% 
+  # filter(participantID > 0) %>% 
+  # group_by(participantID) %>% 
+  # mutate(corr = cor(predicted, profile_rating)) %>% 
+  ungroup() %>% 
+  distinct(participantID, best_model, corr, min_aic) %>% 
+  mutate(prank = percent_rank(corr)) %>% 
+  # filter(prank > .90) %>% 
+  arrange(-corr)
+ # arrange(-desc(min_aic))
 ```
 
+```{r}
+df_aic_graph <- df_aic_fit %>% 
+  # filter(participantID > 0) %>% 
+  # group_by(participantID) %>% 
+  # mutate(corr = cor(predicted, profile_rating)) %>% 
+  ungroup() %>% 
+  distinct(participantID, best_model, corr, min_aic, R2) %>% 
+  mutate(prank = percent_rank(corr))
 
+
+df_aic_graph <- df_aic_graph %>%
+  mutate(
+    best_model_grouped = case_when(
+      best_model %in% c("allo", "allo_neg", "allominmax") ~ "Allocentric",
+      best_model %in% c("pop_allo", "pop_allo_best", "pop_allo_neg") ~ "Popular + Allocentric",
+      best_model %in% c("popego_allo_best", "popego_allo_bestunw", "popego_allo_neg") ~ "Popular + Egocentric + Allocentric",
+      best_model %in% c("popego") ~ "Popular + Egocentric", 
+      best_model %in% c("ego") ~ "Egocentric", 
+      best_model %in% c("hybrid") ~ "Allocentric + Egocentric",
+      TRUE ~ best_model  
+    )
+  )
+
+
+  ggplot(df_aic_graph, aes(x = corr))+
+geom_histogram(binwidth = 0.05, fill = "steelblue", color = "black") +
+  labs(x = "Correlation (Corr)", y = "Count", title = "Histogram of Correlation Faceted by Best Model") +
+  facet_wrap(~ best_model_grouped) +  
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),  
+    axis.text.x = element_text(angle = 45, hjust = 1) 
+  )
+```
 ```{r}
 # aic
 
@@ -2100,181 +2261,98 @@ get_num_params <- function(model_name) {
 
 
 df_with_fits %>% 
-  mutate(
-    allo_summary_r2 = pmap_dbl(list(allo_r2, allobest_r2, allo_neg_r2, allo_minmax_r2), max)
-  ) %>% 
   pivot_longer(c(contains("_r2"), -"max_r2"), names_to = "model", values_to = "R2") %>% 
 
+  
+  mutate(best_model_grouped = case_when(
+      model %in% c("allo_r2", "allo_neg_r2", "allo_minmax_r2", "allobest_r2") ~ "Allocentric",
+      model %in% c("pop_allo_r2", "pop_allo_best_r2", "pop_allo_neg_r2", "pop_allo_bestunw_r2", "pop_allo_minmax_r2") ~ "Popular + Allocentric",
+      model %in% c("popego_allo_r2","popego_allo_best_r2", "popego_allo_bestunw_r2", "popego_allo_neg_r2") ~ "Popular + Egocentric + Allocentric",
+      model == "popego_r2" ~ "Popular + Egocentric", 
+      model == "ego_r2" ~ "Egocentric", 
+      model == "popular_r2" ~ "Popular", 
+      model == "hybrid_r2" ~ "Allocentric + Egocentric",
+      TRUE ~ model  
+  )) %>% 
+  
+  
   mutate(num_params = map_dbl(model, get_num_params)) %>% 
-  
-
   mutate(aic = r2aic_c(R2, TSS, N, num_params)) %>% 
-  
+
   group_by(participantID, profile, cos_sim, euc_dist, mae, corr, best_model) %>% 
   mutate(
-    # min_aic = min(aic),
     delta_aic = aic - min(aic),
     w_aic = exp(-1/2 * delta_aic) / sum(exp(-1/2 * delta_aic)),
     hybrid_waic = sum(if_else(model == "hybrid_r2", w_aic, 0)),
     ego_waic = sum(if_else(model == "ego_r2", w_aic, 0)),
-    max_waic = map_dbl(w_aic, max)
-  ) %>% 
+    max_waic = map_dbl(w_aic, max)) %>% 
   
-
-  ggplot(aes(x=reorder(participantID, hybrid_waic + ego_waic), y = w_aic, fill = model)) +
-  geom_col() +
+  
+  ggplot(aes(x = reorder(participantID, hybrid_waic + ego_waic), y = w_aic, fill = best_model_grouped)) +
+  geom_col(position = "stack", width = 0.8) +  # Increase bar width for better visibility
+  scale_fill_brewer(palette = "Set2") +  # Use a distinct color palette
   theme_bw() +
   theme(
-    axis.text.x = element_text(angle = 90, vjust = .5),
-    panel.grid = element_blank()
-  )  +
-  labs(x = "Participant ID", y = "AIC Weight", fill = "Model")
-
-```
-
-```{r}
-
-r2aic <- function(R2, TSS, n, k){
-  RSS <- (1-R2)*TSS
-  aic <- n * log(RSS/n) + 2 * k
-  return(aic)
-}
-
-
-# Your AIC function
-r2aic_c <- function(R2, TSS, n, k){
-  RSS <- (1-R2) * TSS
-  aic <- n * log(RSS/n) + 2 * k
-  return(aic + (2 * k^2 + 2 * k) / (n - k - 1))
-}
-
-# Combined R² and AIC calculation
-df_aic_fit <- df_centered %>% 
-  group_by(participantID, profile, cos_sim, euc_dist) %>% 
-  summarize(
-    mae = mean(abs(predicted - profile_rating)),
-    corr = cor(predicted, profile_rating),
-    TSS = var(predicted) * n()  # Calculate TSS (Total Sum of Squares)
-  ) %>% 
-  ungroup() %>% 
-  arrange(participantID) %>% 
-  mutate(
-    # R² calculations for each model
-    ego_r2 = map_dbl(models_ego, get_R2),
-    allo_r2 = map_dbl(models_allo, get_R2),
-    allo_neg_r2 = map_dbl(models_allo_neg, get_R2_nls),
-    allobest_r2 = map_dbl(models_allobest_unweighted, get_R2),
-    allo_minmax_r2 = map_dbl(models_allo_minmax, get_R2),
-    hybrid_r2 = map_dbl(models_allo_ego, get_R2),
-    popular_r2 = map_dbl(models_popular, get_R2),
-    popego_r2 = map_dbl(models_popego, get_R2),
-    popego_allo_r2 = map_dbl(models_popego_allo, get_R2),
-    pop_allo_r2 = map_dbl(models_pop_allo, get_R2), 
-    pop_allo_neg_r2 = map_dbl(models_pop_allo_neg, get_R2_nls),
-    pop_allo_best_r2 = map_dbl(models_pop_allobestweighted, get_R2),
-    pop_allo_bestunw_r2 = map_dbl(models_pop_allobest_unweighted, get_R2),
-    pop_allo_minmax_r2 = map_dbl(models_popallo_minmax, get_R2),
-    popego_allo_neg_r2 = map_dbl(models_popego_allo_neg, get_R2_nls),
-    popego_allo_best_r2 = map_dbl(models_popego_allobestweighted, get_R2),
-    popego_allo_bestunw_r2 = map_dbl(models_popego_allobest_unweighted, get_R2),
-    
-    # Dynamic calculation of n (group size) for each participant
-    n = n(),
-
-    # AIC calculations using r2aic_c function for each model
-    ego_aic = pmap_dbl(list(ego_r2, TSS, n, 2), r2aic_c),  # 2 parameters for ego_r2
-    allo_aic = pmap_dbl(list(allo_r2, TSS, n, 2), r2aic_c),  # 3 parameters for allo_r2
-    allo_neg_aic = pmap_dbl(list(allo_neg_r2, TSS, n, 2), r2aic_c),  # 4 parameters for allo_neg_r2
-    allobest_aic = pmap_dbl(list(allobest_r2, TSS, n, 2), r2aic_c),  # 3 parameters for allobest_r2
-    allo_minmax_aic = pmap_dbl(list(allo_minmax_r2, TSS, n, 2), r2aic_c),  # 4 parameters for allo_minmax_r2
-    hybrid_aic = pmap_dbl(list(hybrid_r2, TSS, n, 3), r2aic_c),  # 5 parameters for hybrid_r2
-    popular_aic = pmap_dbl(list(popular_r2, TSS, n, 2), r2aic_c),  # 2 parameters for popular_r2
-    popego_aic = pmap_dbl(list(popego_r2, TSS, n, 3), r2aic_c),  # 3 parameters for popego_r2
-    popego_allo_aic = pmap_dbl(list(popego_allo_r2, TSS, n, 4), r2aic_c),  # 4 parameters for popego_allo_r2
-    pop_allo_aic = pmap_dbl(list(pop_allo_r2, TSS, n, 3), r2aic_c),  # 4 parameters for pop_allo_r2
-    pop_allo_neg_aic = pmap_dbl(list(pop_allo_neg_r2, TSS, n, 3), r2aic_c),  # 5 parameters for pop_allo_neg_r2
-    pop_allo_best_aic = pmap_dbl(list(pop_allo_best_r2, TSS, n, 3), r2aic_c),  # 4 parameters for pop_allo_best_r2
-    pop_allo_bestunw_aic = pmap_dbl(list(pop_allo_bestunw_r2, TSS, n, 3), r2aic_c),  # 4 parameters for pop_allo_bestunw_r2
-    pop_allo_minmax_aic = pmap_dbl(list(pop_allo_minmax_r2, TSS, n, 3), r2aic_c),  # 5 parameters for pop_allo_minmax_r2
-    popego_allo_neg_aic = pmap_dbl(list(popego_allo_neg_r2, TSS, n, 4), r2aic_c),  # 5 parameters for popego_allo_neg_r2
-    popego_allo_best_aic = pmap_dbl(list(popego_allo_best_r2, TSS, n, 4), r2aic_c),  # 4 parameters for popego_allo_best_r2
-    popego_allo_bestunw_aic = pmap_dbl(list(popego_allo_bestunw_r2, TSS, n, 4), r2aic_c)  # 4 parameters for popego_allo_bestunw_r2
-  ) %>% 
-  
-  # Identify the best model based on AIC
-  mutate(
-    min_aic = pmap_dbl(list(ego_aic, allo_aic, allobest_aic, allo_neg_aic, hybrid_aic, allo_minmax_aic, popular_aic, popego_aic, popego_allo_aic, pop_allo_aic, pop_allo_neg_aic, pop_allo_best_aic, pop_allo_minmax_aic, popego_allo_neg_aic, popego_allo_best_aic, popego_allo_bestunw_aic), min),
-    best_model = case_when(
-      min_aic == ego_aic ~ "ego",
-      min_aic == allo_aic ~ "allo",
-      min_aic == allo_neg_aic ~ "allo_neg",
-      min_aic == allobest_aic ~ "allobest",
-      min_aic == allo_minmax_aic ~ "allominmax",
-      min_aic == hybrid_aic ~ "hybrid",
-      min_aic == popular_aic ~ "popular",
-      min_aic == popego_aic ~ "popego",
-      min_aic == popego_allo_aic ~ "popego_allo",
-      min_aic == pop_allo_aic ~ "pop_allo",
-      min_aic == pop_allo_neg_aic ~ "pop_allo_neg",
-      min_aic == pop_allo_best_aic ~ "pop_allo_best",
-      min_aic == pop_allo_bestunw_aic ~ "pop_allo_bestunw",
-      min_aic == pop_allo_minmax_aic ~ "pop_allo_minmax",
-      min_aic == popego_allo_neg_aic ~ "popego_allo_neg",
-      min_aic == popego_allo_best_aic ~ "popego_allo_best",
-      min_aic == popego_allo_bestunw_aic ~ "popego_allo_bestunw"
-    )
-  )
-
-# Count the best models based on AIC
-df_aic_fit %>% 
-  count(best_model)
+    axis.text.y = element_text(size = 8),  # Adjust y-axis text size
+    axis.text.x = element_blank(),  
+    panel.grid = element_blank(), 
+    legend.position = "bottom",  
+    legend.title = element_text(size = 10, face = "bold"),  
+    legend.text = element_text(size = 8)) +  
+  labs(x = "Participant ID", y = "AIC Weight", fill = "Model Group") +
+  ggtitle("AIC Weight Distribution by Participant ID")
 
 ```
 ```{r}
-df_aic_fit %>% 
-  # filter(participantID > 0) %>% 
-  # group_by(participantID) %>% 
-  # mutate(corr = cor(predicted, profile_rating)) %>% 
-  ungroup() %>% 
-  distinct(participantID, best_model, corr, min_aic) %>% 
-  mutate(prank = percent_rank(corr)) %>% 
-  # filter(prank > .90) %>% 
-  arrange(-corr)
- # arrange(-desc(min_aic))
+df_aic_scatter <- df_aic_fit %>%
+  mutate(best_model_r2 = case_when(
+    best_model == "ego" ~ ego_r2,
+    best_model == "allo" ~ allo_r2,
+    best_model == "allo_neg" ~ allo_neg_r2,
+    best_model == "allobest" ~ allobest_r2,
+    best_model == "allominmax" ~ allo_minmax_r2,
+    best_model == "hybrid" ~ hybrid_r2,
+    best_model == "popular" ~ popular_r2,
+    best_model == "popego" ~ popego_r2,
+    best_model == "popego_allo" ~ popego_allo_r2,
+    best_model == "pop_allo" ~ pop_allo_r2,
+    best_model == "pop_allo_neg" ~ pop_allo_neg_r2,
+    best_model == "pop_allo_best" ~ pop_allo_best_r2,
+    best_model == "pop_allo_bestunw" ~ pop_allo_bestunw_r2,
+    best_model == "pop_allo_minmax" ~ pop_allo_minmax_r2,
+    best_model == "popego_allo_neg" ~ popego_allo_neg_r2,
+    best_model == "popego_allo_best" ~ popego_allo_best_r2,
+    best_model == "popego_allo_bestunw" ~ popego_allo_bestunw_r2
+  ))
 ```
 
 ```{r}
-df_aic_graph <- df_aic_fit %>% 
-  # filter(participantID > 0) %>% 
-  # group_by(participantID) %>% 
-  # mutate(corr = cor(predicted, profile_rating)) %>% 
-  ungroup() %>% 
-  distinct(participantID, best_model, corr, min_aic) %>% 
-  mutate(prank = percent_rank(corr))
+df_aic_scatter %>%
+  group_by(participantID)%>%
+  ggplot(mapping = aes(x= corr, y= best_model_r2))+
+  geom_point()
+```
+```{r}
+df_aic_scatter <- df_aic_scatter %>%
+  mutate(quadrant = case_when(
+    corr > 0.3 & best_model_r2 > 0.3 ~ "Good Performance and Good Model Fit",   
+    corr > 0.3 & best_model_r2 <= 0.3 ~ "Good Performance and Poor Model Fit", 
+    corr <= 0.3 & best_model_r2 > 0.3 ~ "Corr <= 0.5, R2 > 0.5", 
+    corr <= 0.3 & best_model_r2 <= 0.3 ~ "Corr <= 0.5, R2 <= 0.5" 
+  ))
 
 
-df_aic_graph <- df_aic_graph %>%
-  mutate(
-    best_model_grouped = case_when(
-      best_model %in% c("allo", "allo_neg", "allominmax") ~ "Allocentric",
-      best_model %in% c("pop_allo", "pop_allo_best", "pop_allo_neg") ~ "Popular + Allocentric",
-      best_model %in% c("popego_allo_best", "popego_allo_bestunw", "popego_allo_neg") ~ "Popular + Egocentric + Allocentric",
-      best_model %in% c("popego") ~ "Popular + Egocentric", 
-      best_model %in% c("ego") ~ "Egocentric", 
-      best_model %in% c("hybrid") ~ "Allocentric + Egocentric",
-      TRUE ~ best_model  
-    )
-  )
-
-
-  ggplot(df_aic_graph, aes(x = corr))+
-geom_histogram(binwidth = 0.05, fill = "steelblue", color = "black") +
-  labs(x = "Correlation (Corr)", y = "Count", title = "Histogram of Correlation Faceted by Best Model") +
-  facet_wrap(~ best_model_grouped) +  
-  theme_minimal() +
-  theme(
-    strip.text = element_text(size = 10),  
-    axis.text.x = element_text(angle = 45, hjust = 1) 
-  )
+ggplot(df_aic_scatter, mapping = aes(x = corr, y = best_model_r2, color = quadrant)) +
+  geom_point() +
+  scale_color_manual(values = c(
+    "Corr > 0.5, R2 > 0.5" = "darkgreen",
+    "Corr > 0.5, R2 <= 0.5" = "blue",
+    "Corr <= 0.5, R2 > 0.5" = "orange",
+    "Corr <= 0.5, R2 <= 0.5" = "red"
+  )) +
+  labs(x = "Correlation (Corr)", y = "Best Model R2", color = "Quadrant") +
+  geom_hline(yintercept = 0.3, linetype = "dashed", color = "black") +  
+  geom_vline(xintercept = 0.3, linetype = "dashed", color = "black") +  
+  theme_minimal()
 ```
 
