@@ -2337,20 +2337,20 @@ df_aic_scatter <- df_aic_scatter %>%
   mutate(quadrant = case_when(
     corr > 0.3 & best_model_r2 > 0.3 ~ "Good Performance and Good Model Fit",   
     corr > 0.3 & best_model_r2 <= 0.3 ~ "Good Performance and Poor Model Fit", 
-    corr <= 0.3 & best_model_r2 > 0.3 ~ "Corr <= 0.5, R2 > 0.5", 
-    corr <= 0.3 & best_model_r2 <= 0.3 ~ "Corr <= 0.5, R2 <= 0.5" 
+    corr <= 0.3 & best_model_r2 > 0.3 ~ "Poor Performance and Good Model Fit", 
+    corr <= 0.3 & best_model_r2 <= 0.3 ~ "Poor Performance and Poor Model Fit" 
   ))
 
 
 ggplot(df_aic_scatter, mapping = aes(x = corr, y = best_model_r2, color = quadrant)) +
   geom_point() +
   scale_color_manual(values = c(
-    "Corr > 0.5, R2 > 0.5" = "darkgreen",
-    "Corr > 0.5, R2 <= 0.5" = "blue",
-    "Corr <= 0.5, R2 > 0.5" = "orange",
-    "Corr <= 0.5, R2 <= 0.5" = "red"
+    "Good Performance and Good Model Fit" = "darkgreen",
+    "Good Performance and Poor Model Fit" = "red",
+    "Poor Performance and Good Model Fit" = "darkgreen",
+    "Poor Performance and Poor Model Fit" = "orange"
   )) +
-  labs(x = "Correlation (Corr)", y = "Best Model R2", color = "Quadrant") +
+  labs(x = "Performance at Inference Task", y = "How Well the Best Model Fit", color = "Quadrant") +
   geom_hline(yintercept = 0.3, linetype = "dashed", color = "black") +  
   geom_vline(xintercept = 0.3, linetype = "dashed", color = "black") +  
   theme_minimal()

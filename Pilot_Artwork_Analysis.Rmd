@@ -72,6 +72,19 @@ filtered_qualtrics_data<- filtered_qualtrics_data %>%
  view(filtered_qualtrics_data)
 ```
 
+```{r}
+filtered_qualtrics_data <- filtered_qualtrics_data%>%
+  mutate(age = as.numeric(age))
+filtered_qualtrics_data %>%
+  summarise(
+    mean_age = mean(age, na.rm = TRUE),
+    median_age = median(age, na.rm = TRUE),
+    min_age = min(age, na.rm = TRUE),
+    max_age = max(age, na.rm = TRUE),
+    sd_age = sd(age, na.rm = TRUE),
+    range_age = max(age, na.rm = TRUE) - min(age, na.rm = TRUE)
+  )
+```
 
 ```{r}
 library(dplyr)
@@ -967,10 +980,26 @@ embeddings
 Matt: can you explore what paintings are similar based on these representations, matching that up to the painting IDs and sanity check if it at all seems like this is tracking how similar the paintings actually are? Here they are joined up so you can match them.
 
 ```{r}
-final_dataset %>% 
+similarity <- final_dataset %>% 
   distinct(Artwork_ID, Title) %>% 
   mutate(Artwork_ID = as.character(Artwork_ID)) %>% 
-  left_join(embeddings, by = c("Artwork_ID"="item"))
->>>>>>> Stashed changes
+  left_join(embeddings, by = c("Artwork_ID"="item"))%>%
+  select(-Title)
+
+```
+
+```{r}
+embedding_matrix <- similarity %>%
+  select(V1, V2, V3) %>%
+  as.matrix()
+
+distance_matrix <- dist(embedding_matrix, method = "euclidean")
+
+distance_matrix <- as.matrix(distance_matrix)
+
+rownames(distance_matrix) <- similarity$Artwork_ID
+colnames(distance_matrix) <- similarity$Artwork_ID
+
+distance_matrix
 ```
 
